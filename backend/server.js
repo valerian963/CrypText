@@ -9,6 +9,7 @@ const socketIo = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
+const hostname = '0.0.0.0'; 
 const io = socketIo(server);
 app.use(bodyParser.json());
 
@@ -52,8 +53,8 @@ const createUsersTable = async () => {
     PRIMARY KEY (friend1, friend2),
     CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
     CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
-    p_value INTEGER NOT NULL,
-    g_value INTEGER NOT NULL,
+    p_value TEXT NOT NULL,
+    g_value TEXT NOT NULL,
     publicKey_friend1 TEXT NOT NULL,
     publicKey_friend2 TEXT
     );
@@ -70,7 +71,7 @@ const createUsersTable = async () => {
   `;
   try {
     await pool.query(createTableQuery);
-    console.log('Tabelas verificadas/criadas com sucesso.');
+    console.log('Tabelas verificadas/criadas com successo.');
   } catch (error) {
     console.error('Erro ao criar/verificar tabelas:', error);
   }
@@ -81,7 +82,7 @@ function cleanJson(jsonString) {
 
   try {
     const resultado = JSON.parse(jsonLimpo);
-    console.log("JSON válido após limpeza.");
+    //console.log("JSON válido após limpeza.");
     return resultado;
   } catch (error) {
     console.log("A limpeza falhou ao produzir JSON válido:", error.message);
@@ -135,11 +136,15 @@ function receiveDiffieHellman (p, g, otherPublicKey) {
 function startDH(socketid, p, g, clientPublicKey) {
   const { publicKey, privateKey, sharedKey } = receiveDiffieHellman (p, g, clientPublicKey);
 
-  console.log('Chaves geradas no servidor\n', JSON.stringify({publicServerKey:publicKey}, {privateServerKey:privateKey}, {sharedKeyValue:sharedKey}));
+  const diffieData = {
+    publicServerKey:publicKey, 
+    privateServerKey:privateKey, 
+    sharedKeyValue:sharedKey
+  };
+  console.log('Chaves geradas no servidor: ', diffieData);
 
   // guarda a chave compartilhada para tal usuário tenporariamente
   diffieHellmanSharedKeysUsers[socketid] = sharedKey;
-  console.log('THE shared key: ', sharedKey);
   // envia a chave pública do servidor de volta ao cliente
   return publicKey;
 };
@@ -154,13 +159,14 @@ io.on('connection', (socket) => {
 
   // compartilhamento de chaves servidor-usuário naquela sessão
   socket.on('diffie-hellman', (p,g,userPublicKey, callback) => {
+    console.log("//Diffie Hellman------------------------------------\n")
     try{
       const  serverPublicKey = startDH(socket.id, p,g,userPublicKey);
-      callback({ sucesso: true, PublicKeyServer: serverPublicKey });
+      callback({success: true, PublicKeyServer: serverPublicKey });
     }
     catch (error) {
       console.error('Erro ao fazer DH: ', error);
-      callback({sucess:false});
+      callback({success:false});
     }
   });
 
@@ -181,6 +187,8 @@ io.on('connection', (socket) => {
 
   // envio de mensagem
   socket.on('send-message', (encryptedData) => {
+    console.log("//Send message------------------------------------\n")
+    console.log('Texto criptografado:', encryptedData); 
 
     const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
 
@@ -204,6 +212,8 @@ io.on('connection', (socket) => {
 
   // Registro de usuários
   socket.on('register', async (encryptedData, callback) => {
+    console.log("//Register user------------------------------------\n")
+    console.log('Texto criptografado:', encryptedData); 
   try {
 
     const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
@@ -215,15 +225,16 @@ io.on('connection', (socket) => {
       [name, email, password, user_name, image]
     );
 
-    callback({sucess:true});
+    callback({success:true});
   } catch (error) {
-    console.error('Erro ao registrar usuários: ', error);
-    callback({sucess:false});
+    callback({success:false});
   }
 });
 
 // Endpoint de Login
 socket.on('login', async (encryptedData, callback) => {
+  console.log("//Login------------------------------------\n")
+  console.log('Texto criptografado:', encryptedData);  
   try {
     const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];
     const decryptedData= decryptDataBlowfish(encryptedData, sharedSecret);
@@ -237,28 +248,31 @@ socket.on('login', async (encryptedData, callback) => {
     
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (decryptedData.password === user.password) {
-      // Se as credenciais forem válidas, envia a resposta de sucesso ao cliente
-      return callback({ sucess:true, message: 'Login realizado com sucesso', userId: user.user_id });
+      // Se as credenciais forem válidas, envia a resposta de successo ao cliente
+      return callback({ success:true, message: 'Login realizado com successo', userId: user.user_id });
     } else {
       // Senha incorreta
-      return callback({ sucess:false, message: 'Credenciais inválidas' });
+      return callback({ success:false, message: 'Credenciais inválidas' });
     }
   } catch (error) {
     console.error(error);
     // Em caso de erro, envia a mensagem de erro através do callback
-    return callback({ sucess:false, message: 'Erro ao fazer login', error: error.message });
+    return callback({ success:false, message: 'Erro ao fazer login', error: error.message });
   }
 });
 
 
 // AMIZADE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-// Listar usuarios (que não são amigos)
+// Listar usuarios
 socket.on('list-users', async (user_name, callback) => {
+  console.log("//List users (not friends)------------------------------------\n")
   try {
     const result = await pool.query(
-      'SELECT user_name FROM users WHERE user_name != $1', 
+      'SELECT u.user_name FROM users u WHERE u.user_name != $1 AND u.user_name NOT IN (SELECT CASE WHEN friend1 = $1 THEN friend2 ELSE friend1 END FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND (friendship = true OR friendship = false));', 
       [user_name]);
+
+    console.log(result.rows)
     callback(result.rows);
   } catch (error) {
     console.error('Erro ao listar usuários:', error);
@@ -269,6 +283,8 @@ socket.on('list-users', async (user_name, callback) => {
 
 // Solicitar amizade
   socket.on('friend-request', async (encryptedData, callback) => {
+    console.log("//Request friendship------------------------------------\n")
+    console.log('Texto criptografado:', encryptedData); 
     try {
 
       const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
@@ -282,15 +298,10 @@ socket.on('list-users', async (user_name, callback) => {
       );
 
       if (existingRequest.rowCount > 0) {
-        callback({ success: false, message: 'Solicitação já enviada' });
+        callback({ success: true, message: 'Solicitação já enviada' });
+        console.log("Solicitação já enviada")
         return;
       }
-
-      // Insere a nova solicitação no banco
-      await pool.query(
-        'INSERT INTO friend_requests (sender_id, recipient_id) VALUES ($1, $2)',
-        [senderId, recipientId]
-      );
 
       // Armazenar solicitacao de amizade no banco de dados
       await pool.query(
@@ -314,16 +325,16 @@ socket.on('list-users', async (user_name, callback) => {
         const recipientSocketId = onlineUsers[user_name2];
         io.to(recipientSocketId).emit('receive-friend-request', { user_name1 });
       }
-
+      console.log();
       callback({ success: true, message: 'Solicitação de amizade enviada' });
     } catch (error) {
-      console.error('Erro ao enviar solicitação de amizade:', error);
-      callback({ success: false, message: 'Erro ao enviar solicitação de amizade' });
+      callback({ success: true, message: 'Erro ao enviar solicitação de amizade: ', error });
     }
   });
 
   // Aceitar solicitação
   socket.on('accept-friend', async (encryptedData, callback) => {
+    console.log('Texto criptografado:', encryptedData); 
     try {
       const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
       const {user_name1, user_name2, publicKey_friend2} = decryptDataBlowfish(encryptedData, sharedSecret);
@@ -380,16 +391,20 @@ socket.on('list-users', async (user_name, callback) => {
     });
 
   // Listar amigos 
-  socket.on('list-friends', async (encryptedData, callback) => {
+  socket.on('list-friends', async (user_name1, callback) => {
+    console.log("//List Friends------------------------------------")
     try {
-      const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
-      const {user_name1} = decryptDataBlowfish(encryptedData, sharedSecret);
-
       const friends = await pool.query(
         'SELECT * FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND friendship = true',
         [user_name1]
       );
-      callback({sucess:true, friends: encryptDataBlowfish(friends.rows,sharedSecret)});
+      const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
+      if (friends.rowCount>0) {
+        callback({success:true, friends: encryptDataBlowfish(friends.rows,sharedSecret)});
+      }
+      else{
+        callback({ success: false, friends: 'Sem amigos' });
+      }
       } catch (error) {
         console.error('Erro ao listar amigos:', error);
         callback({ success: false, message: 'Erro ao listar amigos:', error });
@@ -409,6 +424,7 @@ async function storeOfflineMessage(sender_user_name, recipient_user_name, timest
 
   createUsersTable()
   const PORT = 3000;
-  server.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  server.listen(PORT, hostname, () => {
+    console.log('Server running at http://192.168.1.62:3000');
+  
 });
