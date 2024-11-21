@@ -336,7 +336,7 @@ socket.on('list-users', async (user_name, callback) => {
       // Notifique o destinatário se ele estiver online
       if (onlineUsers[user_name2]) {
         const recipientSocketId = onlineUsers[user_name2];
-        io.to(recipientSocketId).emit('receive-friend-request', { user_name1 });
+        io.to(recipientSocketId).emit('receive-friend-request', encryptDataBlowfish({ friend1: user_name1, p: p_value, g: g_value, publicRemetentKey: publicKey_friend1}, sharedKeyRecipient));
       }
       console.log();
       callback({ success: true, message: 'Solicitação de amizade enviada' });
