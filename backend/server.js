@@ -180,7 +180,7 @@ io.on('connection', (socket) => {
         success: true, 
         message: 'Recuperando dados recebidos enquanto estava offline', 
         offlineMessages:  encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret), 
-        friendRequests: encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret) 
+        friendRequests: encryptDataBlowfish(await getPendingFriendRequests(user_name),sharedSecret) 
       });
     }
     catch(error){
@@ -213,7 +213,7 @@ io.on('connection', (socket) => {
       const recipientSocketId = onlineUsers[recipient_user_name];
       const sharedKeyRecipient = diffieHellmanSharedKeysUsers[recipientSocketId];
       // Envia a mensagem criptografada ao destinatário online
-      io.to(recipientSocketId).emit('receive-message', encryptDataBlowfish({ sender_user_name, timestamp, message }, sharedKeyRecipient));
+      io.to(recipientSocketId).emit('receive-message', encryptDataBlowfish({ friend1: sender_user_name, datetime: timestamp, content: message }, sharedKeyRecipient));
     } else {
       // Caso o destinatário esteja offline, armazene a mensagem no banco
       console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
