@@ -171,9 +171,22 @@ io.on('connection', (socket) => {
   });
 
   // Quando um usuário se conecta, armazene o usuário e o socket
-  socket.on('online-loged', (user_name) => {
-    onlineUsers[user_name] = socket.id;
-    console.log(`Usuário ${user_name} está online com ID de socket: ${socket.id}`);
+  socket.on('online-loged', async (user_name, callback) => {
+    try{
+      onlineUsers[user_name] = socket.id;
+      const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
+      console.log(`Usuário ${user_name} está online com ID de socket: ${socket.id}`);
+      return callback({ 
+        success: true, 
+        message: 'Recuperando dados recebidos enquanto estava offline', 
+        offlineMessages:  encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret), 
+        friendRequests: encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret) 
+      });
+    }
+    catch(error){
+      return callback({ success:false, message: 'Erro ao recuperar dados recebidos enquanto estava offline: ', erro:error});
+    }
+    
   });
 
   // usuario desconectado
@@ -225,9 +238,9 @@ io.on('connection', (socket) => {
       [name, email, password, user_name, image]
     );
 
-    callback({success:true});
+    callback({success:true, message: "Usuário registrado com sucesso"});
   } catch (error) {
-    callback({success:false});
+    callback({success:false, message: "Erro no registro de usuário"});
   }
 });
 
@@ -248,8 +261,8 @@ socket.on('login', async (encryptedData, callback) => {
     
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (decryptedData.password === user.password) {
-      // Se as credenciais forem válidas, envia a resposta de successo ao cliente
-      return callback({ success:true, message: 'Login realizado com successo', userId: user.user_id });
+      // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
+      return callback({ success: true, message: 'Login realizado com sucesso'});
     } else {
       // Senha incorreta
       return callback({ success:false, message: 'Credenciais inválidas' });
@@ -298,7 +311,7 @@ socket.on('list-users', async (user_name, callback) => {
       );
 
       if (existingRequest.rowCount > 0) {
-        callback({ success: true, message: 'Solicitação já enviada' });
+        callback({success: false, message: 'Solicitação já enviada' });
         console.log("Solicitação já enviada")
         return;
       }
@@ -328,7 +341,8 @@ socket.on('list-users', async (user_name, callback) => {
       console.log();
       callback({ success: true, message: 'Solicitação de amizade enviada' });
     } catch (error) {
-      callback({ success: true, message: 'Erro ao enviar solicitação de amizade: ', error });
+      callback({ success: false, message: 'Erro ao enviar solicitação de amizade: ', error });
+      console.log('Erro ao enviar solicitação de amizade: ', error);
     }
   });
 
@@ -421,6 +435,41 @@ async function storeOfflineMessage(sender_user_name, recipient_user_name, timest
     [sender_user_name, recipient_user_name, timestamp, message]
   );
 }
+
+// função para listar mensagens recebidas enquanto estava offline
+const getOfflineMessages = async (user_name) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM messages WHERE friend2 = $1`, 
+      [user_name]
+    );
+
+    await pool.query(
+      `DELETE FROM messages WHERE friend1 = $1`, 
+      [user_name]
+    );
+
+    return result.rows;
+  } catch (error) {
+    console.error('Erro ao recuperar mensagens offline:', error);
+    return [];
+  }
+};
+
+// função para listar solicitações de amizade pendentes
+const getPendingFriendRequests = async (user_name) => {
+  try {
+    const result = await pool.query(
+      `SELECT friend1 FROM users_friends WHERE friend2 = $1 AND friendship = false`, 
+      [user_name]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Erro ao recuperar solicitações de amizade pendentes:', error);
+    return [];
+  }
+};
+
 
   createUsersTable()
   const PORT = 3000;
