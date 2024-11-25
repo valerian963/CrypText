@@ -2,12 +2,17 @@ const io = require('socket.io-client');
 const Blowfish = require('blowfish');
 const { createDiffieHellman } = require('crypto');
 const bcrypt = require('bcrypt');
+const crypt = require('crypto')
 
-const socket = io('http://localhost:3000'); 
+const socket = io('http://192.168.15.6:3000'); 
 let sharedSecret = null;
 let usersNotFriends = []
 let privateKeyFriends = {}
+let solicitacoes = {}
+let mensagensOff = {}
+let solicitacoesAceitas = {}
 
+const minhaSenha = 'senha_segura'
 
 function cleanJson(jsonString) {
   const jsonLimpo = jsonString.replace(/[^{}[\]_@#!?":,a-zA-Z0-9\s.-]/g, "");
@@ -70,6 +75,7 @@ socket.on('connect', (callback) => {
     console.log("Dados Diffie-Hellman Usuário: ", diffieData);
     
     if(response.success){
+
       // registra um usuário
     registerUser();
 
@@ -88,7 +94,7 @@ async function registerUser() {
   const userData = {
     name: 'Teste',
     email: 'teste@mail.com',
-    password: 'senha_segura',
+    password: minhaSenha,
     user_name: 'testinho',
     image: null
   };
@@ -106,18 +112,28 @@ async function registerUser() {
 async function loginUser() {
   const loginData = {
     email: 'teste@mail.com',
-    password:'senha_segura'
+    password:minhaSenha
   };
   const encryptedData = encryptDataBlowfish(loginData, sharedSecret);
   socket.emit('login', encryptedData, (response) => {
     console.log('Resposta de login:', response.message);
     if (response.success) {
-      console.log('Usuário logado com sucesso. ID:', response.userId);
+      console.log('Usuário logado com sucesso.');
       // adicionar usuário como online e logado no servidor
       socket.emit('online-loged', 'testinho', (callback) => {
-        console.log(callback);
+        if (callback.success){
+          console.log('O que aconteceu enquanto estava offline:', callback);
+          const decryptSolicitacoes = decryptDataBlowfish(callback.friendRequests, sharedSecret);
+          const descryptMessages = decryptDataBlowfish(callback.offlineMessages, sharedSecret);
+          const decryptAccept = decryptDataBlowfish(callback.acceptedRequests, sharedSecret);
+          solicitacoes[decryptSolicitacoes.friend1] = {decryptSolicitacoes};
+          mensagensOff[descryptMessages.friend2] = {descryptMessages};
+          solicitacoesAceitas[decryptAccept.friend2] = {decryptAccept}
+          socket.emit('online-users', (result) => {
+            console.log("Usuários online: ", result);
+            });
+        };
       });
-      console.log('O que aconteceu enquanto estava offline:', response.userId);
       // Listar usuários disponíveis
       listUsers();
     }
@@ -220,12 +236,12 @@ socket.on('receive-message', (encryptedData) => {
 });
 
 // aceitar solicitação de amizade 
-function acceptFriendRequest() {
-  const friendData = {
-    friend1: 'usuarioTeste',
-    friend2: 'testinho'
-  };
-  const encryptedData = encryptDataBlowfish(friendData, sharedSecret);
+function acceptFriendRequest(friend_user) {
+  // const friendData = {
+  //   friend1: 'usuarioTeste',
+  //   friend2: 'testinho'
+  // };
+  const encryptedData = encryptDataBlowfish({user_name1: user_name, user_name2: solicitacoes[friend_user].friend1, publicKey_friend2 }, sharedSecret);
   socket.emit('accept-friend', encryptedData);
 }
 
