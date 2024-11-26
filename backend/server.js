@@ -7,6 +7,7 @@ const Blowfish = require('blowfish');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const BigInteger = require('big-integer');
 
 const app = express();
 const server = http.createServer(app);
@@ -111,7 +112,7 @@ const encryptDataBlowfish = (data, key) => {
   const bf = new Blowfish(key);
   const textoCriptografado = bf.encrypt(jsonString);
   console.log('Texto criptografado:', textoCriptografado);    
-  return textoCriptografado.toString('hex')
+  return textoCriptografado.toString('base64')
 };
 
 // Função para descriptografar dados com Blowfish
@@ -147,8 +148,26 @@ function receiveDiffieHellman (p, g, otherPublicKey) {
   return { publicKey, privateKey, sharedKey} ; // usada para criptografia Blowfish
 };
 
-function startDH(socketid, p, g, clientPublicKey) {
-  const { publicKey, privateKey, sharedKey } = receiveDiffieHellman (p, g, clientPublicKey);
+
+
+function modulo(a, b) {
+  // Realiza a divisão inteira de a por b
+  let quociente = Math.floor(a / b);
+
+  // Subtrai a multiplicação do quociente pela base (b) de a
+  return a - (quociente * b);
+}
+
+
+function startDH(socketid, pa, ga, clientPublicKey) {
+  const p = BigInteger(pa)
+  const g = BigInteger(ga)
+  // Chave privada escolhida aleatoriamente pelo servidor
+  const privateKey = BigInteger.randBetween(BigInteger(1), p.minus(1));
+
+  const publicKey = g.modPow(privateKey, p);
+
+  const sharedKey = BigInteger(clientPublicKey).modPow(privateKey, p);
 
   const diffieData = {
     publicServerKey:publicKey, 
@@ -163,14 +182,12 @@ function startDH(socketid, p, g, clientPublicKey) {
   return publicKey;
 };
 
+
+
 // WEBSOCKET PARA MENSAGENS CHAT PRIVADO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   
 io.on('connection', (socket) => {
   console.log('Novo usuário conectado: ', socket.id);
-
-  socket.on('counter', () => {
-    console.log('Evento chegou!')
-  });
 
   // listar usuarios online
   socket.on('online-users', async(callback) => {
@@ -178,7 +195,17 @@ io.on('connection', (socket) => {
 
     let list = Object.keys(onlineUsers);
 
-    const result = await pool.query('SELECT user_name, name FROM users WHERE user_name = ANY($1)', [list]);
+    const result = await pool.query(`
+      SELECT u.user_name, u.name 
+      FROM users u
+      JOIN users_friends uf ON (u.user_name = uf.friend1 OR u.user_name = uf.friend2)
+      JOIN user_status us ON u.user_name = us.user_name
+      WHERE ((uf.friend1 = $1 AND uf.friend2 != $1) OR 
+            (uf.friend2 = $1 AND uf.friend1 != $1))
+        AND uf.friendship = TRUE
+        AND us.is_online = TRUE
+        AND u.user_name = ANY($2)
+      `, [list]);
 
     let send = result.rows;
 
@@ -195,14 +222,12 @@ io.on('connection', (socket) => {
     const diffieData = {
       p_value:p,
       g_value: g,
-      publicKeyUser: userPublicKey, 
-      userPrivateKey:dh.getPrivateKey('hex'),
-      sharedKey: sharedSecret
+      publicKeyUser: userPublicKey
     };
     console.log("Dados Diffie-Hellman Usuário: ", diffieData);
     
     try{
-      const  serverPublicKey = startDH(socket.id, p,g,userPublicKey);
+      const  serverPublicKey = startDH(socket.id, p, g, userPublicKey);
       return callback({success: true, PublicKeyServer: serverPublicKey });
     }
     catch (error) {
@@ -306,7 +331,7 @@ socket.on('login', async (encryptedData, callback) => {
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (decryptedData.password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      return callback({ success: true, message: 'Login realizado com sucesso'});
+      return callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name});
     } else {
       // Senha incorreta
       return callback({ success:false, message: 'Credenciais inválidas' });
