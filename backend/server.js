@@ -139,11 +139,11 @@ function calculateSharedKey(dh, otherPublicKey) {
 
 // Diffie Hellman - Função para gerar chave compartilhada
 function receiveDiffieHellman (p, g, otherPublicKey) {
-  const dh = createDiffieHellman( p, 'hex', g, 'hex' ); 
-  const publicKey = dh.generateKeys('hex'); 
-  const privateKey = dh.getPrivateKey('hex');
+  const dh = createDiffieHellman( p, 'base64', g, 'base64' ); 
+  const publicKey = dh.generateKeys('base64'); 
+  const privateKey = dh.getPrivateKey('base64');
  
-  const sharedKey = dh.computeSecret(otherPublicKey, 'hex', 'hex');
+  const sharedKey = dh.computeSecret(otherPublicKey, 'base64', 'base64');
   return { publicKey, privateKey, sharedKey} ; // usada para criptografia Blowfish
 };
 
@@ -162,7 +162,6 @@ function startDH(socketid, p, g, clientPublicKey) {
   // envia a chave pública do servidor de volta ao cliente
   return publicKey;
 };
-
 
 // WEBSOCKET PARA MENSAGENS CHAT PRIVADO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   
@@ -193,13 +192,22 @@ io.on('connection', (socket) => {
   // compartilhamento de chaves servidor-usuário naquela sessão
   socket.on('diffie-hellman', (p,g,userPublicKey, callback) => {
     console.log("//Diffie Hellman------------------------------------\n")
+    const diffieData = {
+      p_value:p,
+      g_value: g,
+      publicKeyUser: userPublicKey, 
+      userPrivateKey:dh.getPrivateKey('hex'),
+      sharedKey: sharedSecret
+    };
+    console.log("Dados Diffie-Hellman Usuário: ", diffieData);
+    
     try{
       const  serverPublicKey = startDH(socket.id, p,g,userPublicKey);
-      callback({success: true, PublicKeyServer: serverPublicKey });
+      return callback({success: true, PublicKeyServer: serverPublicKey });
     }
     catch (error) {
       console.error('Erro ao fazer DH: ', error);
-      callback({success:false});
+      return callback({success:false});
     }
   });
 
