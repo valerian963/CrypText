@@ -1,3 +1,5 @@
+const Blowfish = require('blowfish');
+
 function cleanJson(jsonString) {
     const jsonLimpo = jsonString.replace(/[^{}[\]_@#!?":,a-zA-Z0-9\s.-]/g, "");
   

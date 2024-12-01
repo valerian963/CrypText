@@ -1,16 +1,12 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const { Pool } = require('pg');
-const { createDiffieHellman } = require('crypto'); 
-const Blowfish = require('blowfish');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const createUsersTable = require('./database/db_tables.js');
 const diffie_hellman = require('./cryptography/diffie_hellman.js');
 const blowfish = require('./cryptography/blowfish.js');
-
 
 const app = express();
 const server = http.createServer(app);
@@ -19,46 +15,12 @@ const io = socketIo(server);
 app.use(cors());
 app.use(bodyParser.json());
 
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-});
-
 let onlineUsers = {}
-// guarda as chaves Diffie-Hellman de cada usuário temporariamente
 
-// WEBSOCKET PARA MENSAGENS CHAT PRIVADO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// WEBSOCKET PARA MENSAGENS CHAT SEGURO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   
 io.on('connection', (socket) => {
   console.log('Novo usuário conectado: ', socket.id);
-
-  // listar usuarios online
-  socket.on('online-users', async(callback) => {
-    console.log("//Lista de usuários online-----------------------------------\n")
-
-    let list = Object.keys(onlineUsers);
-
-    const result = await pool.query(`
-      SELECT u.user_name, u.name 
-      FROM users u
-      JOIN users_friends uf ON (u.user_name = uf.friend1 OR u.user_name = uf.friend2)
-      JOIN user_status us ON u.user_name = us.user_name
-      WHERE ((uf.friend1 = $1 AND uf.friend2 != $1) OR 
-            (uf.friend2 = $1 AND uf.friend1 != $1))
-        AND uf.friendship = TRUE
-        AND us.is_online = TRUE
-        AND u.user_name = ANY($2)
-      `, [list]);
-
-    let send = result.rows;
-
-    console.log('send',send);
-    return callback(send);
-
-  })
 
   //CRIPTOGRAFIA-----------------------------------------------------------------------------------------------------------
 
@@ -75,31 +37,33 @@ io.on('connection', (socket) => {
     try{
       const  serverPublicKey = diffie_hellman.startDH(socket.id, p, g, userPublicKey);
       console.log("+Relação socket-id: chaves compartilhadas+\n",diffie_hellman.diffieHellmanSharedKeysUsers);
-      return callback({success: true, PublicKeyServer: serverPublicKey });
+      callback({success: true, PublicKeyServer: serverPublicKey });
     }
     catch (error) {
       console.error('Erro ao fazer DH: ', error);
-      return callback({success:false});
+      callback({success:false});
     }
   });
 
   // Quando um usuário se conecta, armazene o usuário e o socket
-  socket.on('online-loged', async (user_nameE, callback) => {
+  socket.on('online-loged', async (user_nameEncrypted, callback) => {
     try{
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
-      const user_name = blowfish.decryptDataBlowfish(user_nameE, sharedSecret);
+      const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
+
       onlineUsers[user_name] = socket.id;
       console.log(`Usuário ${user_name} está online com ID de socket: ${socket.id}`);
-      return callback({ 
+      
+      callback({ 
         success: true, 
         message: 'Recuperando dados recebidos enquanto estava offline',
-        offlineMessages:  blowfish.encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret), 
-        friendRequests: blowfish.encryptDataBlowfish(await getPendingFriendRequests(user_name),sharedSecret),
-        acceptedRequests: blowfish.encryptDataBlowfish(await getAcceptedFriendRequests(user_name), sharedSecret) 
+        offlineReceivedMessages:  blowfish.encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret),         //lista criptografada
+        offlineFriendRequests: blowfish.encryptDataBlowfish(await getPendingFriendRequests(user_name),sharedSecret),     //listas criptografada
+        offlineAcceptedRequests: blowfish.encryptDataBlowfish(await getAcceptedFriendRequests(user_name), sharedSecret)  //listas criptografada
       });
     }
     catch(error){
-      return callback({ success:false, message: 'Erro ao recuperar dados recebidos enquanto estava offline: ', erro:error});
+      callback({ success:false, message: 'Erro ao recuperar dados recebidos enquanto estava offline: ', erro:error});
     }
     
   });
@@ -120,46 +84,21 @@ io.on('connection', (socket) => {
     console.log(`Usuário ${socket.id} desconectou.`);
   });
 
-  // envio de mensagem
-  socket.on('send-message', (sender_user_nameE,recipient_user_nameE, timestampE, message) => {
-    console.log("//Send message------------------------------------\n")
-    console.log('Texto criptografado:', encryptedData); 
-
-    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id]; 
-
-    const sender_user_name = blowfish.decryptDataBlowfish(sender_user_nameE, sharedSecret);
-    const recipient_user_name = blowfish.decryptDataBlowfish(recipient_user_nameE, sharedSecret);
-    const timestamp = blowfish.decryptDataBlowfish(timestampE, sharedSecret);
-   
-    if (onlineUsers[recipient_user_name]) {
-      // Se o destinatário está online, envie a mensagem diretamente
-      const recipientSocketId = onlineUsers[recipient_user_name];
-      const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
-      // Envia a mensagem criptografada ao destinatário online
-      io.to(recipientSocketId).emit('receive-message', blowfish.encryptDataBlowfish({ friend1: sender_user_name, datetime: timestamp, content: message }, sharedKeyRecipient));
-    } else {
-      // Caso o destinatário esteja offline, armazene a mensagem no banco
-      console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
-      storeOfflineMessage(sender_user_name, recipient_user_name, timestamp, message);
-    }
-  });
-
-
 
   // REGISTRO E LOGIN--------------------------------------------------------------------------------------------------------------------------------------------------
 
   // Registro de usuários
-  socket.on('register', async (nameE, emailE, passwordE, user_nameE,imageE, callback) => {
+  socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted,imageEncrypted, callback) => {
     console.log("//Register user------------------------------------\n")
     console.log('Texto criptografado:', encryptedData); 
   try {
 
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
-    const name = blowfish.decryptDataBlowfish(nameE, sharedSecret);
-    const email = blowfish.decryptDataBlowfish(emailE, sharedSecret);
-    const password = blowfish.decryptDataBlowfish(passwordE, sharedSecret);
-    const user_name = blowfish.decryptDataBlowfish(user_nameE, sharedSecret);
-    const image = blowfish.decryptDataBlowfish(imageE,sharedSecret);
+    const name = blowfish.decryptDataBlowfish(nameEncrypted, sharedSecret);
+    const email = blowfish.decryptDataBlowfish(emailEncrypted, sharedSecret);
+    const password = blowfish.decryptDataBlowfish(passwordEncrypted, sharedSecret);
+    const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
+    const image = blowfish.decryptDataBlowfish(imageEncrypted,sharedSecret);
 
     await pool.query(
       'INSERT INTO users (name, email, password, user_name, profile_pic) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
@@ -183,7 +122,7 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
 
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (result.rowCount === 0) {
-      return callback({ message: 'Usuário não encontrado' });
+      callback({ success: false, message: 'Usuário não encontrado' });
     }
     
     const user = result.rows[0];
@@ -191,15 +130,15 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      return callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, });
+      callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, });
     } else {
       // Senha incorreta
-      return callback({ success:false, message: 'Credenciais inválidas' });
+      callback({ success:false, message: 'Credenciais inválidas' });
     }
   } catch (error) {
     console.error(error);
     // Em caso de erro, envia a mensagem de erro através do callback
-    return callback({ success:false, message: 'Erro ao fazer login', error: error.message });
+    callback({ success:false, message: 'Erro ao fazer login', error: error.message });
   }
 });
 
@@ -207,32 +146,39 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
 // AMIZADE---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 // Listar usuarios
-socket.on('list-users', async (user_name, callback) => {
+socket.on('list-users', async (user_nameEncrypted, callback) => {
   console.log("//List users (not friends)------------------------------------\n")
   try {
+    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+    const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
+
     const result = await pool.query(
       'SELECT u.user_name FROM users u WHERE u.user_name != $1 AND u.user_name NOT IN (SELECT CASE WHEN friend1 = $1 THEN friend2 ELSE friend1 END FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND (friendship = true OR friendship = false));', 
       [user_name]);
 
     console.log(result.rows)
-    callback(result.rows);
+    callback({success: true, list: result.rows});
   } catch (error) {
     console.error('Erro ao listar usuários:', error);
-    callback([]);
+    callback({success: false, list:[]});
   }
 });
 
 
 // Solicitar amizade
-  socket.on('friend-request', async (encryptedData, callback) => {
+  socket.on('friend-request', async (user_name1Encrypted, user_name2Encrypted, p_valueEncrypted, g_valueEncrypted, publicKey_friend1Encrypted, callback) => {
     console.log("//Request friendship------------------------------------\n")
     console.log('Texto criptografado:', encryptedData); 
     try {
 
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
 
-      const {user_name1, user_name2, p_value, g_value, publicKey_friend1} = blowfish.decryptDataBlowfish(encryptedData, sharedSecret);
-
+      const user_name1 = blowfish.decryptDataBlowfish(user_name1Encrypted, sharedSecret);
+      const user_name2 = blowfish.decryptDataBlowfish(user_name2Encrypted, sharedSecret);
+      const p_value = blowfish.decryptDataBlowfish(p_valueEncrypted, sharedSecret);
+      const g_value = blowfish.decryptDataBlowfish(g_valueEncrypted, sharedSecret);
+      const publicKey_friend1 = blowfish.decryptDataBlowfish(publicKey_friend1Encrypted, sharedSecret);
+     
       // Verifica se já existe uma solicitação pendente ou aceita
       const existingRequest = await pool.query(
         'SELECT * FROM users_friends WHERE ((friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)) AND friendship = true',
@@ -242,7 +188,6 @@ socket.on('list-users', async (user_name, callback) => {
       if (existingRequest.rowCount > 0) {
         callback({success: false, message: 'Solicitação já enviada' });
         console.log("Solicitação já enviada")
-        return;
       }
 
       // Armazenar solicitacao de amizade no banco de dados
@@ -266,7 +211,12 @@ socket.on('list-users', async (user_name, callback) => {
       if (onlineUsers[user_name2]) {
         const recipientSocketId = onlineUsers[user_name2];
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
-        io.to(recipientSocketId).emit('receive-friend-request', blowfish.encryptDataBlowfish({friend1: user_name1, p: p_value, g: g_value, "publicKey_friend1": publicKey_friend1}, sharedKeyRecipient));
+        // Evento para o destinatário receber pedido de amizade
+        io.to(recipientSocketId).emit('receive-friend-request', 
+          blowfish.encryptDataBlowfish(user_name1, sharedKeyRecipient),
+          blowfish.encryptDataBlowfish(p_value, sharedKeyRecipient),
+          blowfish.encryptDataBlowfish(g_value, sharedKeyRecipient),
+          blowfish.encryptDataBlowfish(publicKey_friend1, sharedKeyRecipient));
       }
       console.log();
       callback({ success: true, message: 'Solicitação de amizade enviada' });
@@ -277,11 +227,13 @@ socket.on('list-users', async (user_name, callback) => {
   });
 
   // Aceitar solicitação
-  socket.on('accept-friend', async (encryptedData, callback) => {
+  socket.on('accept-friend', async (user_name1Encrypted, user_name2Encrypted, publicKey_friend2Encrypted, callback) => {
     console.log('Texto criptografado:', encryptedData); 
     try {
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
-      const {user_name1, user_name2, publicKey_friend2} = blowfish.decryptDataBlowfish(encryptedData, sharedSecret);
+      const user_name1 = blowfish.decryptDataBlowfish(user_name1Encrypted, sharedSecret);
+      const user_name2 = blowfish.decryptDataBlowfish(user_name2Encrypted, sharedSecret);
+      const publicKey_friend2 = blowfish.decryptDataBlowfish(publicKey_friend2Encrypted, sharedSecret);
 
       // Verifica se já existe uma solicitação pendente ou aceita
       const existingRequest = await pool.query(
@@ -336,21 +288,23 @@ socket.on('list-users', async (user_name, callback) => {
     });
 
    // Recusar solicitação 
-   socket.on('reject-friend', async (encryptedData, callback) => {
+   socket.on('reject-friend', async (user_name1Encrypted, user_name2Encrypted, callback) => {
     try {
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
-      const {user_name1, user_name2} = blowfish.decryptDataBlowfish(encryptedData, sharedSecret);
+      const user_name1 = blowfish.decryptDataBlowfish(user_name1Encrypted, sharedSecret);
+      const user_name2 = blowfish.decryptDataBlowfish(user_name2Encrypted, sharedSecret);
 
-      // Alterar estado da solicitacao de amizade no banco de dados para true (aceito)
+      // Deletar solicitação do banco porque foi rejeitada
       await pool.query(
         'DELETE FROM users_friends WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
-      [user_name1, user_name2,true]
+      [user_name1, user_name2]
       );
 
       await pool.query(
-        'UPDATE friends_dh SET publicKey_friend2 = $2 WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
-      [user_name1, user_name2, publicKey_friend2]
-    );
+        'DELETE FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
+      [user_name1, user_name2]
+      );
+
        callback({ success: true, message: 'Solicitação rejeitada' });
       } catch (error) {
         console.error('Erro ao rejeitar solicitação de amizade:', error);
@@ -368,7 +322,7 @@ socket.on('list-users', async (user_name, callback) => {
       );
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
       if (friends.rowCount>0) {
-        callback({success:true, friends: blowfish.encryptDataBlowfish(friends.rows,sharedSecret)});
+        callback({success:true, friends: blowfish.encryptDataBlowfish(friends.rows,sharedSecret)});  //lista criptografada
       }
       else{
         callback({ success: false, friends: 'Sem amigos' });
@@ -379,6 +333,57 @@ socket.on('list-users', async (user_name, callback) => {
       }
     });
 
+  // listar amigos online
+  socket.on('online-friends', async(user_nameEncrypted, callback) => {
+    console.log("//Lista de amigos online-----------------------------------\n")
+    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+    const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
+
+    let list = Object.keys(onlineUsers);
+
+    const result = await pool.query(`
+      SELECT u.user_name, u.name 
+      FROM users u
+      JOIN users_friends uf ON (u.user_name = uf.friend1 OR u.user_name = uf.friend2)
+      WHERE ((uf.friend1 = $1 AND uf.friend2 != $1) OR 
+            (uf.friend2 = $1 AND uf.friend1 != $1))
+        AND uf.friendship = TRUE
+        AND u.user_name = ANY($2)
+      `, [user_name, list]);
+
+    let send = result.rows;
+
+    console.log('send',send);
+    callback(blowfish.encryptDataBlowfish(send,sharedSecret)); //lista criptografada
+
+  })
+
+    // envio de mensagem
+  socket.on('send-message', (sender_user_nameEncrypted,recipient_user_nameEncrypted, timestampEncrypted, message) => {
+    console.log("//Send message------------------------------------\n")
+    console.log('Texto criptografado:', encryptedData); 
+
+    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id]; 
+
+    const sender_user_name = blowfish.decryptDataBlowfish(sender_user_nameEncrypted, sharedSecret);
+    const recipient_user_name = blowfish.decryptDataBlowfish(recipient_user_nameEncrypted, sharedSecret);
+    const timestamp = blowfish.decryptDataBlowfish(timestampEncrypted, sharedSecret);
+   
+    if (onlineUsers[recipient_user_name]) {
+      // Se o destinatário está online, envie a mensagem diretamente
+      const recipientSocketId = onlineUsers[recipient_user_name];
+      const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
+      // Evento para enviar a mensagem criptografada ao destinatário online
+      io.to(recipientSocketId).emit('receive-message', 
+        blowfish.encryptDataBlowfish(sender_user_name,sharedKeyRecipient),
+        blowfish.encryptDataBlowfish(timestamp, sharedKeyRecipient),
+        blowfish.encryptDataBlowfish(message, sharedKeyRecipient));
+    } else {
+      // Caso o destinatário esteja offline, armazene a mensagem no banco
+      console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
+      storeOfflineMessage(sender_user_name, recipient_user_name, timestamp, message);
+    }
+  });
 
     //GRUPOS-----------------------------------------------------------------------------------
 
@@ -451,9 +456,9 @@ const getAcceptedFriendRequests = async (user_name) => {
 };
 
 
-  createUsersTable(pool)
+  createUsersTable()
   const PORT = 3000;
   server.listen(PORT, hostname, () => {
-    console.log('Server running at http://192.168.1.62:3000');
+    console.log('Server running');
   
 });
