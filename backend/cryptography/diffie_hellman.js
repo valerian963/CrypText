@@ -1,17 +1,19 @@
 // CRIPTOGRAFIA ------------------------------------------------------------------------------------------------------------------------
-  
+const BigInteger = require('big-integer');
+let diffieHellmanSharedKeysUsers = {};
+
   // Diffie Hellman - Função para gerar p, g e chave publica
 function startDiffieHellman() {
     const dh = createDiffieHellman(512); // 512 bits para segurança
-    const p = dh.getPrime('hex');
-    const g = dh.getGenerator('hex');
-    const publicKey = dh.generateKeys('hex');
+    const p = dh.getPrime('base64');
+    const g = dh.getGenerator('base64');
+    const publicKey = dh.generateKeys('base64');
   
     return { dh, p, g, publicKey };
   }
   
 function calculateSharedKey(dh, otherPublicKey) {
-    const sharedKey = dh.computeSecret(otherPublicKey, 'hex', 'hex');
+    const sharedKey = dh.computeSecret(otherPublicKey, 'base64', 'base64');
     return sharedKey; // Usada para criptografia Blowfish
   }
   
@@ -39,4 +41,4 @@ function startDH(socketid, pa, ga, clientPublicKey) {
     return publicKey;
   };
 
-module.exports = {startDH};
+module.exports = {startDH, diffieHellmanSharedKeysUsers};

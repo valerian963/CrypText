@@ -51,7 +51,27 @@ const createUsersTable = async (pool) => {
       g_value TEXT NOT NULL,
       publicKey_friend2 TEXT NOT NULL
       );
-  
+
+      CREATE TABLE IF NOT EXISTS groups (
+      group_id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      date_creation TIMESTAMP,
+      admin TEXT NOT NULL,
+      members TEXT[] NOT NULL,
+      group_pic bytea
+      );
+
+      CREATE TABLE IF NOT EXISTS groups_keys(
+      friend1 VARCHAR(20),
+      friend2 VARCHAR(20),
+      group_id SERIAL,
+      PRIMARY KEY (friend1, friend2, group_id),
+      CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
+      CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
+      CONSTRAINT fk_group_id FOREIGN KEY(group_id) REFERENCES groups(group_id),
+      key TEXT NOT NULL
+      );
     `;
     try {
       await pool.query(createTableQuery);
