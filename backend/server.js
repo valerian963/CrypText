@@ -8,6 +8,10 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const BigInteger = require('big-integer');
+const createUsersTable = require('./database/db_tables.js');
+const diffie_hellman = require('./cryptography/diffie_hellman.js');
+const blowfish = require('./cryptography/blowfish.js');
+
 
 const app = express();
 const server = http.createServer(app);
@@ -28,69 +32,6 @@ let onlineUsers = {}
 // guarda as chaves Diffie-Hellman de cada usuário temporariamente
 let diffieHellmanSharedKeysUsers = {};
 
-
-// BANCO DE DADOS ----------------------------------------------------------------------------------------------------------------------------------------------------------------
-const createUsersTable = async () => {
-  const createTableQuery = `
-    CREATE TABLE IF NOT EXISTS users (
-      user_id SERIAL,
-      name TEXT NOT NULL,
-      email VARCHAR(255) UNIQUE NOT NULL,
-      user_name VARCHAR(20) PRIMARY KEY,
-      password TEXT NOT NULL,
-      profile_pic bytea
-    );
-
-    CREATE TABLE IF NOT EXISTS users_friends (
-    friend1 VARCHAR(20),
-    friend2 VARCHAR(20),
-    PRIMARY KEY (friend1, friend2),
-    CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
-    CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
-    friendship BOOLEAN NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS friends_dh (
-    friend1 VARCHAR(20),
-    friend2 VARCHAR(20),
-    PRIMARY KEY (friend1, friend2),
-    CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
-    CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
-    p_value TEXT NOT NULL,
-    g_value TEXT NOT NULL,
-    publicKey_friend1 TEXT NOT NULL,
-    publicKey_friend2 TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS messages (
-    friend1 VARCHAR(20),
-    friend2 VARCHAR(20),
-    dateTime TIMESTAMP,
-    PRIMARY KEY (friend1, friend2, dateTime),
-    CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
-    CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
-    content TEXT
-    );
-    
-    CREATE TABLE IF NOT EXISTS accepted_requests (
-    friend1 VARCHAR(20),
-    friend2 VARCHAR(20),
-    PRIMARY KEY (friend1, friend2),
-    CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
-    CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
-    p_value TEXT NOT NULL,
-    g_value TEXT NOT NULL,
-    publicKey_friend2 TEXT NOT NULL
-    );
-
-  `;
-  try {
-    await pool.query(createTableQuery);
-    console.log('Tabelas verificadas/criadas com successo.');
-  } catch (error) {
-    console.error('Erro ao criar/verificar tabelas:', error);
-  }
-};
 
 function cleanJson(jsonString) {
   const jsonLimpo = jsonString.replace(/[^{}[\]_@#!?":,a-zA-Z0-9\s.-]/g, "");
@@ -138,26 +79,6 @@ function calculateSharedKey(dh, otherPublicKey) {
   return sharedKey; // Usada para criptografia Blowfish
 }
 
-// Diffie Hellman - Função para gerar chave compartilhada
-function receiveDiffieHellman (p, g, otherPublicKey) {
-  const dh = createDiffieHellman( p, 'base64', g, 'base64' ); 
-  const publicKey = dh.generateKeys('base64'); 
-  const privateKey = dh.getPrivateKey('base64');
- 
-  const sharedKey = dh.computeSecret(otherPublicKey, 'base64', 'base64');
-  return { publicKey, privateKey, sharedKey} ; // usada para criptografia Blowfish
-};
-
-
-
-function modulo(a, b) {
-  // Realiza a divisão inteira de a por b
-  let quociente = Math.floor(a / b);
-
-  // Subtrai a multiplicação do quociente pela base (b) de a
-  return a - (quociente * b);
-}
-
 
 function startDH(socketid, pa, ga, clientPublicKey) {
   const p = BigInteger(pa)
@@ -182,6 +103,7 @@ function startDH(socketid, pa, ga, clientPublicKey) {
   return publicKey;
 };
 
+// AUTENTICACAO COM HMAC
 
 
 // WEBSOCKET PARA MENSAGENS CHAT PRIVADO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -228,6 +150,7 @@ io.on('connection', (socket) => {
     
     try{
       const  serverPublicKey = startDH(socket.id, p, g, userPublicKey);
+      console.log("+Relação socket-id: chaves compartilhadas+\n",diffieHellmanSharedKeysUsers);
       return callback({success: true, PublicKeyServer: serverPublicKey });
     }
     catch (error) {
@@ -237,14 +160,15 @@ io.on('connection', (socket) => {
   });
 
   // Quando um usuário se conecta, armazene o usuário e o socket
-  socket.on('online-loged', async (user_name, callback) => {
+  socket.on('online-loged', async (user_nameE, callback) => {
     try{
+      const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];
+      const user_name = decryptDataBlowfish(user_nameE, sharedSecret);
       onlineUsers[user_name] = socket.id;
-      const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
       console.log(`Usuário ${user_name} está online com ID de socket: ${socket.id}`);
       return callback({ 
         success: true, 
-        message: 'Recuperando dados recebidos enquanto estava offline', 
+        message: 'Recuperando dados recebidos enquanto estava offline',
         offlineMessages:  encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret), 
         friendRequests: encryptDataBlowfish(await getPendingFriendRequests(user_name),sharedSecret),
         acceptedRequests: encryptDataBlowfish(await getAcceptedFriendRequests(user_name), sharedSecret) 
@@ -261,6 +185,7 @@ io.on('connection', (socket) => {
     const disconnectedUser = Object.keys(onlineUsers).find(user_name => onlineUsers[user_name] === socket.id);
     if (disconnectedUser) {
       delete onlineUsers[disconnectedUser];
+      delete diffieHellmanSharedKeysUsers[socket.id];
       console.log(`Usuário ${disconnectedUser} desconectou.`);
     }
   });
@@ -293,14 +218,17 @@ io.on('connection', (socket) => {
   // REGISTRO E LOGIN--------------------------------------------------------------------------------------------------------------------------------------------------
 
   // Registro de usuários
-  socket.on('register', async (encryptedData, callback) => {
+  socket.on('register', async (nameE, emailE, passwordE, user_nameE,imageE, callback) => {
     console.log("//Register user------------------------------------\n")
     console.log('Texto criptografado:', encryptedData); 
   try {
 
-    const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];  
-
-    const {name, email, password, user_name,image} = decryptDataBlowfish(encryptedData, sharedSecret);
+    const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];
+    const name = decryptDataBlowfish(nameE, sharedSecret);
+    const email = decryptDataBlowfish(emailE, sharedSecret);
+    const password = decryptDataBlowfish(passwordE, sharedSecret);
+    const user_name = decryptDataBlowfish(user_nameE, sharedSecret);
+    const image = decryptDataBlowfish(imageE,sharedSecret);
 
     await pool.query(
       'INSERT INTO users (name, email, password, user_name, profile_pic) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
@@ -314,14 +242,15 @@ io.on('connection', (socket) => {
 });
 
 // Endpoint de Login
-socket.on('login', async (encryptedData, callback) => {
+socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
   console.log("//Login------------------------------------\n")
-  console.log('Texto criptografado:', encryptedData);  
   try {
     const sharedSecret = diffieHellmanSharedKeysUsers[socket.id];
-    const decryptedData= decryptDataBlowfish(encryptedData, sharedSecret);
+    const email = decryptDataBlowfish(emailEncrypted, sharedSecret);
+    const password = decryptDataBlowfish(passwordEncrypted, sharedSecret);
+    
 
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [decryptedData.email]);
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (result.rowCount === 0) {
       return callback({ message: 'Usuário não encontrado' });
     }
@@ -329,9 +258,9 @@ socket.on('login', async (encryptedData, callback) => {
     const user = result.rows[0];
     
     // Verifica se a senha fornecida corresponde à senha armazenada
-    if (decryptedData.password === user.password) {
+    if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      return callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name});
+      return callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, });
     } else {
       // Senha incorreta
       return callback({ success:false, message: 'Credenciais inválidas' });
@@ -588,7 +517,7 @@ const getAcceptedFriendRequests = async (user_name) => {
 };
 
 
-  createUsersTable()
+  createUsersTable(pool)
   const PORT = 3000;
   server.listen(PORT, hostname, () => {
     console.log('Server running at http://192.168.1.62:3000');

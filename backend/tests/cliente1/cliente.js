@@ -1,8 +1,6 @@
 const io = require('socket.io-client');
 const Blowfish = require('blowfish');
 const { createDiffieHellman } = require('crypto');
-const bcrypt = require('bcrypt');
-const crypt = require('crypto')
 
 const socket = io('http://192.168.15.6:3000'); 
 let sharedSecret = null;
