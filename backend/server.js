@@ -351,10 +351,8 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         AND u.user_name = ANY($2)
       `, [user_name, list]);
 
-    let send = result.rows;
-
-    console.log('send',send);
-    callback(blowfish.encryptDataBlowfish(send,sharedSecret)); //lista criptografada
+    console.log('onlineFriends',result.rows);
+    callback(blowfish.encryptDataBlowfish(result.row,sharedSecret)); //lista criptografada
 
   })
 
@@ -377,7 +375,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       io.to(recipientSocketId).emit('receive-message', 
         blowfish.encryptDataBlowfish(sender_user_name,sharedKeyRecipient),
         blowfish.encryptDataBlowfish(timestamp, sharedKeyRecipient),
-        blowfish.encryptDataBlowfish(message, sharedKeyRecipient));
+        message);
     } else {
       // Caso o destinatário esteja offline, armazene a mensagem no banco
       console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
