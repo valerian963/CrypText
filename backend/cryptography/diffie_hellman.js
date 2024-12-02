@@ -1,6 +1,5 @@
 // CRIPTOGRAFIA ------------------------------------------------------------------------------------------------------------------------
-const BigInteger = require('big-integer');
-const { createDiffieHellman } = require('crypto'); 
+const BigInteger = require('big-integer'); 
 
 // guarda as chaves Diffie-Hellman de cada usuário temporariamente
 let diffieHellmanSharedKeysUsers = {};
