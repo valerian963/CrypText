@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const { Pool } = require('pg');
 const bodyParser = require('body-parser');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -16,6 +17,14 @@ app.use(cors());
 app.use(bodyParser.json());
 
 let onlineUsers = {}
+
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+});
 
 // WEBSOCKET PARA MENSAGENS CHAT SEGURO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   
@@ -57,7 +66,7 @@ io.on('connection', (socket) => {
       callback({ 
         success: true, 
         message: 'Recuperando dados recebidos enquanto estava offline',
-        offlineReceivedMessages:  blowfish.encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret),         //lista criptografada
+        offlineReceivedMessages: blowfish.encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret),         //lista criptografada
         offlineFriendRequests: blowfish.encryptDataBlowfish(await getPendingFriendRequests(user_name),sharedSecret),     //listas criptografada
         offlineAcceptedRequests: blowfish.encryptDataBlowfish(await getAcceptedFriendRequests(user_name), sharedSecret)  //listas criptografada
       });
@@ -313,19 +322,22 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
     });
 
   // Listar amigos 
-  socket.on('list-friends', async (user_name1, callback) => {
+  socket.on('list-friends', async (user_name1Encrypted, callback) => {
     console.log("//List Friends------------------------------------")
     try {
+      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
+      const user_name1 = blowfish.decryptDataBlowfish(user_name1Encrypted, sharedSecret)
       const friends = await pool.query(
         'SELECT * FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND friendship = true',
         [user_name1]
       );
-      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
+
       if (friends.rowCount>0) {
+        console.log(`Amigos de ${user_name1}`,friends.rows)
         callback({success:true, friends: blowfish.encryptDataBlowfish(friends.rows,sharedSecret)});  //lista criptografada
       }
       else{
-        callback({ success: false, friends: 'Sem amigos' });
+        callback({success: false, friends: 'Sem amigos' });
       }
       } catch (error) {
         console.error('Erro ao listar amigos:', error);
@@ -454,7 +466,7 @@ const getAcceptedFriendRequests = async (user_name) => {
 };
 
 
-  createUsersTable()
+  createUsersTable(pool)
   const PORT = 3000;
   server.listen(PORT, hostname, () => {
     console.log('Server running');
