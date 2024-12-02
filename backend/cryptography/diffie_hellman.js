@@ -23,7 +23,7 @@ function startDH(socketid, pa, ga, clientPublicKey) {
     console.log('Chaves geradas no servidor: ', diffieData);
   
     // guarda a chave compartilhada para tal usuário tenporariamente
-    diffieHellmanSharedKeysUsers[socketid] = sharedKey;
+    diffieHellmanSharedKeysUsers[socketid] = String(sharedKey);
     // envia a chave pública do servidor de volta ao cliente
     return publicKey;
   };

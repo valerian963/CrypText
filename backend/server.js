@@ -7,8 +7,7 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const createUsersTable = require('./database/db_tables.js');
 const diffie_hellman = require('./cryptography/diffie_hellman.js');
-const blowfish = require('./cryptography/blowfish.js');
-
+const { blowfish } = require('./cryptography/blowfish.js')
 const app = express();
 const server = http.createServer(app);
 const hostname = '0.0.0.0'; 
@@ -99,15 +98,14 @@ io.on('connection', (socket) => {
   // Registro de usuários
   socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted,imageEncrypted, callback) => {
     console.log("//Register user------------------------------------\n")
-    console.log('Texto criptografado:', encryptedData); 
   try {
 
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
-    const name = blowfish.decryptDataBlowfish(nameEncrypted, sharedSecret);
-    const email = blowfish.decryptDataBlowfish(emailEncrypted, sharedSecret);
-    const password = blowfish.decryptDataBlowfish(passwordEncrypted, sharedSecret);
-    const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
-    const image = blowfish.decryptDataBlowfish(imageEncrypted,sharedSecret);
+    const name = blowfish.decrypt(nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+    const email = blowfish.decrypt(emailEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+    const password = blowfish.decrypt(passwordEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+    const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+    const image = blowfish.decrypt(imageEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
 
     await pool.query(
       'INSERT INTO users (name, email, password, user_name, profile_pic) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
@@ -116,6 +114,7 @@ io.on('connection', (socket) => {
 
     callback({success:true, message: "Usuário registrado com sucesso"});
   } catch (error) {
+    console.log(error)
     callback({success:false, message: "Erro no registro de usuário"});
   }
 });
@@ -177,7 +176,6 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
 // Solicitar amizade
   socket.on('friend-request', async (user_name1Encrypted, user_name2Encrypted, p_valueEncrypted, g_valueEncrypted, publicKey_friend1Encrypted, callback) => {
     console.log("//Request friendship------------------------------------\n")
-    console.log('Texto criptografado:', encryptedData); 
     try {
 
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
@@ -237,7 +235,6 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
 
   // Aceitar solicitação
   socket.on('accept-friend', async (user_name1Encrypted, user_name2Encrypted, publicKey_friend2Encrypted, callback) => {
-    console.log('Texto criptografado:', encryptedData); 
     try {
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
       const user_name1 = blowfish.decryptDataBlowfish(user_name1Encrypted, sharedSecret);
@@ -371,7 +368,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
     // envio de mensagem
   socket.on('send-message', (sender_user_nameEncrypted,recipient_user_nameEncrypted, timestampEncrypted, message) => {
     console.log("//Send message------------------------------------\n")
-    console.log('Texto criptografado:', encryptedData); 
+
 
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id]; 
 
