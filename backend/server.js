@@ -12,7 +12,6 @@ const blowfish = require('./cryptography/blowfish.js');
 const app = express();
 const server = http.createServer(app);
 const hostname = '0.0.0.0'; 
-const io = socketIo(server);
 app.use(cors());
 app.use(bodyParser.json());
 
@@ -28,126 +27,133 @@ const pool = new Pool({
 
 // WEBSOCKET PARA MENSAGENS CHAT SEGURO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   
-io.on('connection', (socket) => {
-  console.log('Novo usuário conectado: ', socket.id);
-
   //CRIPTOGRAFIA-----------------------------------------------------------------------------------------------------------
 
-  // compartilhamento de chaves servidor-usuário naquela sessão
-  socket.on('diffie-hellman', (p,g,userPublicKey, callback) => {
-    console.log("//Diffie Hellman------------------------------------\n")
-    const diffieData = {
-      p_value:p,
-      g_value: g,
-      publicKeyUser: userPublicKey
-    };
-    console.log("Dados Diffie-Hellman Usuário: ", diffieData);
-    
-    try{
-      const  serverPublicKey = diffie_hellman.startDH(socket.id, p, g, userPublicKey);
-      console.log("+Relação socket-id: chaves compartilhadas+\n",diffie_hellman.diffieHellmanSharedKeysUsers);
-      callback({success: true, PublicKeyServer: serverPublicKey });
-    }
-    catch (error) {
-      console.error('Erro ao fazer DH: ', error);
-      callback({success:false});
-    }
-  });
+// compartilhamento de chaves servidor-usuário naquela sessão
+app.post('/diffie-hellman', (req, res) => {
+  const { connectionId, p, g, userPublicKey } = req.body;
 
-  // Quando um usuário se conecta, armazene o usuário e o socket
-  socket.on('online-loged', async (user_nameEncrypted, callback) => {
-    try{
-      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
-      const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
-
-      onlineUsers[user_name] = socket.id;
-      console.log(`Usuário ${user_name} está online com ID de socket: ${socket.id}`);
-      
-      callback({ 
-        success: true, 
-        message: 'Recuperando dados recebidos enquanto estava offline',
-        offlineReceivedMessages: blowfish.encryptDataBlowfish(await getOfflineMessages(user_name),sharedSecret),         //lista criptografada
-        offlineFriendRequests: blowfish.encryptDataBlowfish(await getPendingFriendRequests(user_name),sharedSecret),     //listas criptografada
-        offlineAcceptedRequests: blowfish.encryptDataBlowfish(await getAcceptedFriendRequests(user_name), sharedSecret)  //listas criptografada
-      });
-    }
-    catch(error){
-      callback({ success:false, message: 'Erro ao recuperar dados recebidos enquanto estava offline: ', erro:error});
-    }
-    
-  });
-
-  // usuario desconectado
-  socket.on('disconnected', () => {
-    try{
-      delete onlineUsers[disconnectedUser];}
-    catch{
-      console.log("Usuário não estava logado")
-    }
-    try{
-      delete diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
-    }
-    catch{
-      console.log("Usuário não fez troca de chaves com servidor")
-    }
-    console.log(`Usuário ${socket.id} desconectou.`);
-  });
-
-
-  // REGISTRO E LOGIN--------------------------------------------------------------------------------------------------------------------------------------------------
-
-  // Registro de usuários
-  socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted,imageEncrypted, callback) => {
-    console.log("//Register user------------------------------------\n")
-    console.log('Texto criptografado:', encryptedData); 
   try {
+    const serverPublicKey = diffie_hellman.startDH(connectionId, p, g, userPublicKey);
+    console.log("+Relação connectionId: chaves compartilhadas+\n", diffie_hellman.diffieHellmanSharedKeysUsers);
+    res.json({ success: true, publicKeyServer: serverPublicKey });
+  } catch (error) {
+    console.error('Erro ao fazer Diffie-Hellman:', error);
+    res.status(500).json({ success: false, message: 'Erro ao compartilhar chaves' });
+  }
+});
+  
+  // Quando um usuário se conecta e está logado, armazene o usuário e o id de conexão
+app.post('/online-loged', async (req, res) => {
+  const { user_nameEncrypted, connectionId } = req.body;
 
-    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+  try {
+    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[connectionId];
+    const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
+
+    // Marca o usuário como online
+    onlineUsers[user_name] = connectionId;
+
+    // Recupera dados offline
+    const offlineMessages = await getOfflineMessages(user_name);                        // mensagens individuais
+    const offlineFriendRequests = await getPendingFriendRequests(user_name);           // solicitações de amizade
+    const offlineAcceptedRequests = await getAcceptedFriendRequests(user_name);       // aceites de solitação para poder calcular a chave compartilhada dos dois amigos
+
+    res.json({
+      success: true,
+      message: 'Recuperando dados recebidos enquanto estava offline',
+      offlineReceivedMessages: blowfish.encryptDataBlowfish(offlineMessages, sharedSecret),
+      offlineFriendRequests: blowfish.encryptDataBlowfish(offlineFriendRequests, sharedSecret),
+      offlineAcceptedRequests: blowfish.encryptDataBlowfish(offlineAcceptedRequests, sharedSecret),
+    });
+  } catch (error) {
+    console.error('Erro ao recuperar dados offline:', error);
+    res.status(500).json({ success: false, message: 'Erro ao recuperar dados offline' });
+  }
+});
+
+app.post('/disconnect', (req, res) => {
+  const { connectionId } = req.body;
+
+  try{
+    delete onlineUsers[connectionId];}
+  catch{
+    console.log("Usuário não estava logado")
+  }
+  try{
+    delete diffie_hellman.diffieHellmanSharedKeysUsers[connectionId];
+  }
+  catch{
+    console.log("Usuário não fez troca de chaves com servidor")
+  }
+  console.log(`Usuário ${connectionId} desconectou.`);
+  res.json({ success: true, message: 'Usuário desconectado' });
+});
+  
+
+// REGISTRO E LOGIN--------------------------------------------------------------------------------------------------------------------------------------------------
+
+// Registro de usuários
+app.post('/register', async (req, res) => {
+  const { nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted, imageEncrypted, connectionId } = req.body;
+  console.log("//Registro de usuário------------------------------------\n")
+  try {
+    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[connectionId];
     const name = blowfish.decryptDataBlowfish(nameEncrypted, sharedSecret);
     const email = blowfish.decryptDataBlowfish(emailEncrypted, sharedSecret);
     const password = blowfish.decryptDataBlowfish(passwordEncrypted, sharedSecret);
     const user_name = blowfish.decryptDataBlowfish(user_nameEncrypted, sharedSecret);
-    const image = blowfish.decryptDataBlowfish(imageEncrypted,sharedSecret);
+    const image = blowfish.decryptDataBlowfish(imageEncrypted, sharedSecret);
 
     await pool.query(
-      'INSERT INTO users (name, email, password, user_name, profile_pic) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
+      'INSERT INTO users (name, email, password, user_name, profile_pic) VALUES ($1, $2, $3, $4, $5)',
       [name, email, password, user_name, image]
     );
 
-    callback({success:true, message: "Usuário registrado com sucesso"});
+    res.json({ success: true, message: 'Usuário registrado com sucesso' });
   } catch (error) {
-    callback({success:false, message: "Erro no registro de usuário"});
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Erro ao registrar usuário' });
   }
 });
 
 // Endpoint de Login
-socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
+app.post('/login', async (req, res) => {
   console.log("//Login------------------------------------\n")
+  const { emailEncrypted, passwordEncrypted, connectionId } = req.body;
+  
   try {
-    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[connectionId];
     const email = blowfish.decryptDataBlowfish(emailEncrypted, sharedSecret);
     const password = blowfish.decryptDataBlowfish(passwordEncrypted, sharedSecret);
-    
 
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+
     if (result.rowCount === 0) {
-      callback({ success: false, message: 'Usuário não encontrado' });
+      return res.status(404).json({ success: false, message: 'Usuário não encontrado' });
     }
-    
+
     const user = result.rows[0];
-    
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (password === user.password) {
-      // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, });
+      // Gera um token JWT para autenticar futuras requisições
+      const token = jwt.sign({ id: user.user_id }, SECRET_KEY, { expiresIn: '1h' });
+
+      // Marca o usuário como online
+      onlineUsers[user.user_id] = connectionId;
+
+      res.json({ 
+        success: true, 
+        token,
+        name: blowfish.encryptDataBlowfish(user.name, sharedSecret), 
+        user_name: blowfish.encryptDataBlowfish(user.user_name, sharedSecret)
+      });
     } else {
-      // Senha incorreta
-      callback({ success:false, message: 'Credenciais inválidas' });
+      res.status(401).json({ success: false, message: 'Senha inválida' });
     }
   } catch (error) {
     console.error(error);
-    // Em caso de erro, envia a mensagem de erro através do callback
-    callback({ success:false, message: 'Erro ao fazer login', error: error.message });
+    res.status(500).json({ success: false, message: 'Erro ao fazer login' });
   }
 });
 
@@ -172,6 +178,42 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
     callback({success: false, list:[]});
   }
 });
+
+app.get('/users', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+  // Extrai o token do cabeçalho
+  const token = authHeader && authHeader.split(" ")[1];
+    if (verifyToken(token)){
+      const decoded = jwt.verify(token, 'your-secret-key');
+      
+      const user_name = req.user.user_name;
+      const result = await pool.query(
+        'SELECT u.user_name FROM users u WHERE u.user_name != $1 AND u.user_name NOT IN (SELECT CASE WHEN friend1 = $1 THEN friend2 ELSE friend1 END FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND (friendship = true OR friendship = false));',
+        [user_name]
+      );
+      res.json({ success: true, list: result.rows });
+    }else{
+      res.status(401).json({ error: 'Invalid token' });
+    }
+  } catch (error) {
+    console.error('Erro ao listar usuários:', error);
+    res.status(400).json({ success: false, message: 'Erro ao listar usuários' });
+  }
+});
+
+function verifyToken(token) {
+if (!token) return res.status(401).json({ error: 'Access denied' });
+try {
+ const decoded = jwt.verify(token, 'your-secret-key');
+ req.userId = decoded.userId;
+ next();
+ } catch (error) {
+ 
+ }
+ };
+
 
 
 // Solicitar amizade
@@ -234,6 +276,31 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       console.log('Erro ao enviar solicitação de amizade: ', error);
     }
   });
+
+
+
+app.get('/notifications', authenticateToken, async (req, res) => {
+  const user_name = req.user.user_name;
+
+  try {
+      // Busca notificações pendentes para o usuário
+      const friendRequests = await pool.query(
+          'SELECT friend1, p_value, g_value, publicKey_friend1 FROM friends_dh WHERE friend2 = $1',
+          [user_name]
+      );
+
+      if (friendRequests.rowCount === 0) {
+          return res.status(200).json({ notifications: [] });
+      }
+
+      // Retorna as notificações encontradas
+      res.status(200).json({ notifications: friendRequests.rows });
+  } catch (error) {
+      console.error('Erro ao buscar notificações:', error);
+      res.status(500).json({ message: 'Erro interno do servidor' });
+  }
+});
+
 
   // Aceitar solicitação
   socket.on('accept-friend', async (user_name1Encrypted, user_name2Encrypted, publicKey_friend2Encrypted, callback) => {
@@ -398,7 +465,6 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
     //GRUPOS-----------------------------------------------------------------------------------
 
 
-});
 
 // função para armazenar mensagens offline no banco de dados
 async function storeOfflineMessage(sender_user_name, recipient_user_name, timestamp, message) {
