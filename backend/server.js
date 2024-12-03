@@ -79,7 +79,7 @@ io.on('connection', (socket) => {
   });
 
   // usuario desconectado
-  socket.on('disconnected', () => {
+  socket.on('disconnect', () => {
     try{
       delete onlineUsers[disconnectedUser];}
     catch{
