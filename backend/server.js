@@ -140,7 +140,10 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, profile_pic: result.profile_pic});
+      callback({ success: true, message: 'Login realizado com sucesso', 
+        user_name: blowfish.encrypt(result.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
+        name: blowfish.encrypt(result.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
+        profile_pic: blowfish.encrypt(result.profile_pic, sharedSecret, {cipherMode: 0, outputType: 0})});
     } else {
       // Senha incorreta
       callback({ success:false, message: 'Credenciais inválidas' });
