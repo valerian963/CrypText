@@ -25,6 +25,8 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
+const JWT_SECRET = process.env.JWT_SECRET;
+
 // WEBSOCKET PARA MENSAGENS CHAT SEGURO ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   
 io.on('connection', (socket) => {
@@ -138,7 +140,7 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, });
+      callback({ success: true, message: 'Login realizado com sucesso', user_name: result.user_name, name: result.name, profile_pic: result.profile_pic});
     } else {
       // Senha incorreta
       callback({ success:false, message: 'Credenciais inválidas' });
@@ -364,7 +366,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       `, [user_name, list]);
 
     console.log('onlineFriends',result.rows);
-    callback(blowfish.encrypt(result.row,sharedSecret, {cipherMode: 0, outputType: 0})); //lista criptografada
+    callback(blowfish.encrypt(result.rows,sharedSecret, {cipherMode: 0, outputType: 0})); //lista criptografada
 
   })
 
