@@ -150,6 +150,7 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
         profile_pic: blowfish.encrypt(user.profile_pic, sharedSecret, {cipherMode: 0, outputType: 0})});
     } else {
       // Senha incorreta
+      console.log(`Erro no login: Credenciais inválidas`);
       callback({ success:false, message: 'Credenciais inválidas' });
     }
   } catch (error) {
@@ -329,7 +330,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       const user_name1 = blowfish.decrypt(user_name1Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       const user_name2 = blowfish.decrypt(user_name2Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       console.log(`Usuário ${user_name2} recusou pedido de amziade de ${user_name1}`);
-      
+
       // Deletar solicitação do banco porque foi rejeitada
       await pool.query(
         'DELETE FROM users_friends WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
@@ -402,51 +403,66 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
   // listar amigos online
   socket.on('online-friends', async(user_nameEncrypted, callback) => {
     console.log("//Lista de amigos online-----------------------------------\n")
-    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
-    const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+    try{
+      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+      const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
 
-    let list = Object.keys(onlineUsers);
+      let list = Object.keys(onlineUsers);
 
-    const result = await pool.query(`
-      SELECT u.user_name, u.name 
-      FROM users u
-      JOIN users_friends uf ON (u.user_name = uf.friend1 OR u.user_name = uf.friend2)
-      WHERE ((uf.friend1 = $1 AND uf.friend2 != $1) OR 
-            (uf.friend2 = $1 AND uf.friend1 != $1))
-        AND uf.friendship = TRUE
-        AND u.user_name = ANY($2)
-      `, [user_name, list]);
+      const result = await pool.query(`
+        SELECT u.user_name, u.name 
+        FROM users u
+        JOIN users_friends uf ON (u.user_name = uf.friend1 OR u.user_name = uf.friend2)
+        WHERE ((uf.friend1 = $1 AND uf.friend2 != $1) OR 
+              (uf.friend2 = $1 AND uf.friend1 != $1))
+          AND uf.friendship = TRUE
+          AND u.user_name = ANY($2)
+        `, [user_name, list]);
 
-    console.log('onlineFriends',result.rows);
-    callback(blowfish.encrypt(result.rows,sharedSecret, {cipherMode: 0, outputType: 0})); //lista criptografada
+      console.log('Lista de amigos online',result.rows);
+      callback({sucess: true, list: blowfish.encrypt(result.rows,sharedSecret, {cipherMode: 0, outputType: 0})}); //lista criptografada
 
+    }
+    catch(error){
+      console.log('Falha ao listar amigos online: ', error);
+      callback({sucess: false}); //lista criptografada
+    }
+    
   })
 
     // envio de mensagem
   socket.on('send-message', (sender_user_nameEncrypted,recipient_user_nameEncrypted, timestampEncrypted, message) => {
     console.log("//Send message------------------------------------\n")
 
+    try{
+      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id]; 
 
-    const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id]; 
-
-    const sender_user_name = blowfish.decrypt(sender_user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
-    const recipient_user_name = blowfish.decrypt(recipient_user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
-    const timestamp = blowfish.decrypt(timestampEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
-   
-    if (onlineUsers[recipient_user_name]) {
-      // Se o destinatário está online, envie a mensagem diretamente
-      const recipientSocketId = onlineUsers[recipient_user_name];
-      const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
-      // Evento para enviar a mensagem criptografada ao destinatário online
-      io.to(recipientSocketId).emit('receive-message', 
-        {sender: blowfish.encrypt(sender_user_name,sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-        timestamp: blowfish.encrypt(timestamp, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-        content: message});
-    } else {
-      // Caso o destinatário esteja offline, armazene a mensagem no banco
-      console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
-      storeOfflineMessage(sender_user_name, recipient_user_name, timestamp, message);
+      const sender_user_name = blowfish.decrypt(sender_user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+      const recipient_user_name = blowfish.decrypt(recipient_user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+      const timestamp = blowfish.decrypt(timestampEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+     
+      if (onlineUsers[recipient_user_name]) {
+        // Se o destinatário está online, envie a mensagem diretamente
+        const recipientSocketId = onlineUsers[recipient_user_name];
+        const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
+        // Evento para enviar a mensagem criptografada ao destinatário online
+        io.to(recipientSocketId).emit('receive-message', 
+          {sender: blowfish.encrypt(sender_user_name,sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          timestamp: blowfish.encrypt(timestamp, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          content: message});
+  
+      } else {
+        // Caso o destinatário esteja offline, armazene a mensagem no banco
+        console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
+        storeOfflineMessage(sender_user_name, recipient_user_name, timestamp, message);
+      }
+      callback({sucess: true}); 
     }
+    catch(error){
+      console.log(`Erro no envio da mensagem: ${error}`);
+      callback({sucess: false}); 
+    }
+    
   });
 
     //GRUPOS-----------------------------------------------------------------------------------
