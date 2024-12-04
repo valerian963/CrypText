@@ -35,7 +35,7 @@ const createUsersTable = async (pool) => {
       CREATE TABLE IF NOT EXISTS messages (
       friend1 VARCHAR(20),
       friend2 VARCHAR(20),
-      dateTime TIMESTAMP,
+      dateTime TEXT,
       PRIMARY KEY (friend1, friend2, dateTime),
       CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
       CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
@@ -58,7 +58,7 @@ const createUsersTable = async (pool) => {
       group_id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
-      date_creation TIMESTAMP,
+      date_creation TEXT,
       admin TEXT NOT NULL,
       members TEXT[] NOT NULL,
       group_pic bytea
