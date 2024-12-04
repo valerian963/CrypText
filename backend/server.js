@@ -170,14 +170,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
     const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
 
     const result = await pool.query(
-      `SELECT u.*
-      FROM users u
-      WHERE u.user_name != $1
-      AND u.user_name NOT IN (
-          SELECT friend1 FROM users_friends WHERE friend2 = $1
-          UNION
-          SELECT friend2 FROM users_friends WHERE friend1 = $1
-      );`
+      'SELECT u.user_name, u.name, u.email FROM users u WHERE u.user_name != $1 AND u.user_name NOT IN (SELECT CASE WHEN friend1 = $1 THEN friend2 ELSE friend1 END FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND (friendship = true OR friendship = false));', 
       [user_name]);
 
     console.log('Lista de usuários descriptografada: \n',result.rows)
