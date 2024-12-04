@@ -143,7 +143,7 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
         onlineUsers[user.user_name] = socket.id;     
-        console.log(`Login realizado por usuário ${user_name}: ${socket.id}`);
+        console.log(`Login realizado por usuário ${user.user_name}: ${socket.id}`);
         callback({ success: true, message: 'Login realizado com sucesso', 
         user_name: blowfish.encrypt(user.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
         name: blowfish.encrypt(user.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
@@ -170,7 +170,14 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
     const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
 
     const result = await pool.query(
-      'SELECT u.user_name, u.name, u.email FROM users u WHERE u.user_name != $1 AND u.user_name NOT IN (SELECT CASE WHEN friend1 = $1 THEN friend2 ELSE friend1 END FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND (friendship = true OR friendship = false));', 
+      `SELECT u.*
+      FROM users u
+      WHERE u.user_name != $1
+      AND u.user_name NOT IN (
+          SELECT friend1 FROM users_friends WHERE friend2 = $1
+          UNION
+          SELECT friend2 FROM users_friends WHERE friend1 = $1
+      );`
       [user_name]);
 
     console.log('Lista de usuários descriptografada: \n',result.rows)
@@ -440,9 +447,9 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
       // Evento para enviar a mensagem criptografada ao destinatário online
       io.to(recipientSocketId).emit('receive-message', 
-        blowfish.encrypt(sender_user_name,sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-        blowfish.encrypt(timestamp, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-        message);
+        {sender: blowfish.encrypt(sender_user_name,sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+        timestamp: blowfish.encrypt(timestamp, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+        content: message});
     } else {
       // Caso o destinatário esteja offline, armazene a mensagem no banco
       console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
