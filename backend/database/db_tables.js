@@ -50,7 +50,8 @@ const createUsersTable = async (pool) => {
       CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
       p_value TEXT NOT NULL,
       g_value TEXT NOT NULL,
-      publicKey_friend2 TEXT NOT NULL
+      publicKey_friend2 TEXT NOT NULL,
+      accepted BOOLEAN
       );
 
       CREATE TABLE IF NOT EXISTS groups (

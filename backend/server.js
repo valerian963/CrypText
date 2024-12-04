@@ -69,7 +69,8 @@ io.on('connection', (socket) => {
         message: 'Recuperando dados recebidos enquanto estava offline',
         offlineReceivedMessages: await getOfflineMessages(user_name,sharedSecret),         //lista criptografada
         offlineFriendRequests:await getPendingFriendRequests(user_name,sharedSecret),     //listas criptografada
-        offlineAcceptedRequests: await getAcceptedFriendRequests(user_name, sharedSecre)  //listas criptografada
+        offlineAcceptedRequests: await getAcceptedFriendRequests(user_name, sharedSecret),  //listas criptografada
+        offlineRefusedRequests: await getRefusedFriendRequests(user_name, sharedSecre)  //listas criptografada
       });
     }
     catch(error){
@@ -114,6 +115,7 @@ io.on('connection', (socket) => {
       [name, email, password, user_name, image]
     );
 
+    console.log(`Usuário ${user_name} registrado`);
     callback({success:true, message: "Usuário registrado com sucesso"});
   } catch (error) {
     console.log(error)
@@ -140,8 +142,9 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-onlineUsers[user.user_name] = socket.id;     
- callback({ success: true, message: 'Login realizado com sucesso', 
+        onlineUsers[user.user_name] = socket.id;     
+        console.log(`Login realizado por usuário ${user_name}: ${socket.id}`);
+        callback({ success: true, message: 'Login realizado com sucesso', 
         user_name: blowfish.encrypt(user.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
         name: blowfish.encrypt(user.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
         profile_pic: blowfish.encrypt(user.profile_pic, sharedSecret, {cipherMode: 0, outputType: 0})});
@@ -229,8 +232,6 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       );
 
       // Notifique o destinatário se ele estiver online
-console.log('user: ',user_name2,'\nlist of online users', onlineUsers);
-
       if (onlineUsers[user_name2]) {
         const recipientSocketId = onlineUsers[user_name2];
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
@@ -239,8 +240,7 @@ console.log('user: ',user_name2,'\nlist of online users', onlineUsers);
           'SELECT name, email FROM users WHERE user_name = $1',
           [user_name1]
         );
-
-console.log(data_sender.rows[0])
+        console.log(`Notificando usuário ${user_name2}: da solicitação de amizade de ${user_name1}`);
         io.to(recipientSocketId).emit('receive-friend-request', {
           user_name: blowfish.encrypt(user_name1, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
           name: blowfish.encrypt(data_sender.rows[0].name, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
@@ -260,6 +260,7 @@ console.log(data_sender.rows[0])
   // Aceitar solicitação
   socket.on('accept-friend', async (user_name1Encrypted, user_name2Encrypted, publicKey_friend2Encrypted, callback) => {
     try {
+      console.log(`Usuário ${user_name2} aceitou pedido de amziade de ${user_name1}`);
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
       const user_name1 = blowfish.decrypt(user_name1Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       const user_name2 = blowfish.decrypt(user_name2Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
@@ -286,10 +287,12 @@ console.log(data_sender.rows[0])
         'UPDATE friends_dh SET publicKey_friend2 = $3 WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
       [user_name1, user_name2, publicKey_friend2]
     );
+  
        callback({ success: true, message: 'Amizade aceita' });
 
        if (onlineUsers[user_name1]) {
         // Se o destinatário está online, envie o aceite de amizade diretamente
+        console.log(`Notificando usuário ${user_name1}: do aceite de amizade de ${user_name2}`);
         const recipientSocketId = onlineUsers[user_name1]
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
         io.to(recipientSocketId).emit('accepted-friendship', 
@@ -298,7 +301,7 @@ console.log(data_sender.rows[0])
        });
        }
        else{
-
+        console.log(`Aceite do usuário ${user_name1} para amizade de ${user_name2} armazenado no banco de dados`);
         const result = await pool.query(
           'SELECT p_value, g_value FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
         [user_name1, user_name2]
@@ -308,10 +311,10 @@ console.log(data_sender.rows[0])
 
         await pool.query(
           `
-          INSERT INTO accepted_requests (friend1, friend2, p_value, g_value, publicKey_friend2)
-          VALUES ($1, $2, $3, $4, $5);
+          INSERT INTO accepted_requests (friend1, friend2, p_value, g_value, publicKey_friend2, accepted)
+          VALUES ($1, $2, $3, $4, $5, $6);
           `,
-          [user_name1, user_name2,p_value, g_value, publicKey_friend2]
+          [user_name1, user_name2,p_value, g_value, publicKey_friend2, true]
         );
        }
       } catch (error) {
@@ -323,6 +326,7 @@ console.log(data_sender.rows[0])
    // Recusar solicitação 
    socket.on('reject-friend', async (user_name1Encrypted, user_name2Encrypted, callback) => {
     try {
+      console.log(`Usuário ${user_name2} recusou pedido de amziade de ${user_name1}`);
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
       const user_name1 = blowfish.decrypt(user_name1Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       const user_name2 = blowfish.decrypt(user_name2Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
@@ -337,9 +341,33 @@ console.log(data_sender.rows[0])
         'DELETE FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
       [user_name1, user_name2]
       );
+      console.log(`Notificando usuário ${user_name1}: da recusa de amizade de ${user_name2}`);
 
-      io.to(recipientSocketId).emit('refused-friendship', 
-      {user_name: blowfish.encrypt(user_name2, sharedKeyRecipient,{cipherMode: 0, outputType: 0})});
+      if (onlineUsers[user_name1]) {
+        // Se o destinatário está online, envie o aceite de amizade diretamente
+        console.log(`Notificando usuário ${user_name1}: da recusa de amizade de ${user_name2}`);
+        const recipientSocketId = onlineUsers[user_name1]
+        const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
+        io.to(recipientSocketId).emit('refused-friendship', 
+          {user_name: blowfish.encrypt(user_name2, sharedKeyRecipient,{cipherMode: 0, outputType: 0})});
+       }
+       else{
+        console.log(`Recusa do usuário ${user_name1} para amizade de ${user_name2} armazenada no banco de dados`);
+        const result = await pool.query(
+          'SELECT p_value, g_value FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
+        [user_name1, user_name2]
+        );
+        let p_value = result.p_value;
+        let g_value = result.g_value;
+
+        await pool.query(
+          `
+          INSERT INTO accepted_requests (friend1, friend2, p_value, g_value, publicKey_friend2, accepted)
+          VALUES ($1, $2, $3, $4, $5, $6);
+          `,
+          [user_name1, user_name2,p_value, g_value, publicKey_friend2, false]
+        );
+       }
 
        callback({ success: true, message: 'Solicitação rejeitada' });
       } catch (error) {
@@ -506,13 +534,47 @@ const getPendingFriendRequests = async (user_name, sharedSecret) => {
 const getAcceptedFriendRequests = async (user_name, sharedSecret) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM accepted_requests WHERE friend2 = $1`, 
-      [user_name]
+      `SELECT * FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      [user_name, true]
     );
 
     await pool.query(
-      `DELETE FROM accepted_requests WHERE friend2 = $1`, 
-      [user_name]
+      `DELETE FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      [user_name, true]
+    );
+
+    console.log('Lista de solicitações aceitas descriptografada: \n',result.rows)
+
+    for (let i=0;i<result.rowCount;i++){
+      result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['publicKey_friend2'] =  blowfish.encrypt(result.rows[i]['publicKey_friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
+    };
+
+    console.log('Lista de solicitações aceitas criptografada: \n',result.rows)
+
+    return result.rows;
+  } catch (error) {
+    console.error('Erro ao recuperar solicitações de amizade aceitas:', error);
+    return [];
+  }
+};
+
+
+// função para listar solicitações de amizade aceitas
+const getRefusedFriendRequests = async (user_name, sharedSecret) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      [user_name, false]
+    );
+
+    await pool.query(
+      `DELETE FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      [user_name, false]
     );
 
     console.log('Lista de solicitações aceitas descriptografada: \n',result.rows)
