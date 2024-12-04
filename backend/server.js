@@ -288,9 +288,9 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         const recipientSocketId = onlineUsers[user_name1]
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
         io.to(recipientSocketId).emit('accepted-friendship', 
-          blowfish.encrypt(user_name2, sharedKeyRecipient,{cipherMode: 0, outputType: 0}),
-          blowfish.encrypt(publicKey_friend2, sharedKeyRecipient,{cipherMode: 0, outputType: 0})
-        );
+          {user_name: blowfish.encrypt(user_name2, sharedKeyRecipient,{cipherMode: 0, outputType: 0}),
+          publicKeyFriend: blowfish.encrypt(publicKey_friend2, sharedKeyRecipient,{cipherMode: 0, outputType: 0})
+       });
        }
        else{
 
@@ -332,6 +332,9 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         'DELETE FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
       [user_name1, user_name2]
       );
+
+      io.to(recipientSocketId).emit('refused-friendship', 
+      {user_name: blowfish.encrypt(user_name2, sharedKeyRecipient,{cipherMode: 0, outputType: 0})});
 
        callback({ success: true, message: 'Solicitação rejeitada' });
       } catch (error) {
