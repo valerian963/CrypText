@@ -431,7 +431,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
   })
 
     // envio de mensagem
-  socket.on('send-message', (sender_user_nameEncrypted,recipient_user_nameEncrypted, timestampEncrypted, message) => {
+  socket.on('send-message', (sender_user_nameEncrypted,recipient_user_nameEncrypted, timestampEncrypted, message, callback) => {
     console.log("//Send message------------------------------------\n")
 
     try{
