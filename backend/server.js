@@ -231,11 +231,11 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         const recipientSocketId = onlineUsers[user_name2];
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
         // Evento para o destinatário receber pedido de amizade
-        io.to(recipientSocketId).emit('receive-friend-request', 
-          blowfish.encrypt(user_name1, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-          blowfish.encrypt(p_value, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-          blowfish.encrypt(g_value, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-          blowfish.encrypt(publicKey_friend1, sharedKeyRecipient, {cipherMode: 0, outputType: 0}));
+        io.to(recipientSocketId).emit('receive-friend-request', {
+          user_name: blowfish.encrypt(user_name1, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          p_value: blowfish.encrypt(p_value, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          g_value: blowfish.encrypt(g_value, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          public_key: blowfish.encrypt(publicKey_friend1, sharedKeyRecipient, {cipherMode: 0, outputType: 0})});
       }
       console.log();
       callback({ success: true, message: 'Solicitação de amizade enviada' });
