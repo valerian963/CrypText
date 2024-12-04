@@ -420,12 +420,12 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         `, [user_name, list]);
 
       console.log('Lista de amigos online',result.rows);
-      callback({sucess: true, list: blowfish.encrypt(result.rows,sharedSecret, {cipherMode: 0, outputType: 0})}); //lista criptografada
+      callback({success: true, list: blowfish.encrypt(result.rows,sharedSecret, {cipherMode: 0, outputType: 0})}); //lista criptografada
 
     }
     catch(error){
       console.log('Falha ao listar amigos online: ', error);
-      callback({sucess: false}); //lista criptografada
+      callback({success: false}); //lista criptografada
     }
     
   })
@@ -456,11 +456,11 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
         storeOfflineMessage(sender_user_name, recipient_user_name, timestamp, message);
       }
-      callback({sucess: true}); 
+      callback({success: true}); 
     }
     catch(error){
       console.log(`Erro no envio da mensagem: ${error}`);
-      callback({sucess: false}); 
+      callback({success: false}); 
     }
     
   });
