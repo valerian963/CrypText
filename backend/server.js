@@ -140,7 +140,8 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     // Verifica se a senha fornecida corresponde à senha armazenada
     if (password === user.password) {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
-      callback({ success: true, message: 'Login realizado com sucesso', 
+onlineUsers[user.user_name] = socket.id;     
+ callback({ success: true, message: 'Login realizado com sucesso', 
         user_name: blowfish.encrypt(user.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
         name: blowfish.encrypt(user.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
         profile_pic: blowfish.encrypt(user.profile_pic, sharedSecret, {cipherMode: 0, outputType: 0})});
@@ -228,6 +229,8 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       );
 
       // Notifique o destinatário se ele estiver online
+console.log('user: ',user_name2,'\nlist of online users', onlineUsers);
+
       if (onlineUsers[user_name2]) {
         const recipientSocketId = onlineUsers[user_name2];
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
@@ -236,10 +239,12 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
           'SELECT name, email FROM users WHERE user_name = $1',
           [user_name1]
         );
+
+console.log(data_sender.rows[0])
         io.to(recipientSocketId).emit('receive-friend-request', {
           user_name: blowfish.encrypt(user_name1, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-          name: blowfish.encrypt(data_sender.name, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
-          email: blowfish.encrypt(data_sender.name, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          name: blowfish.encrypt(data_sender.rows[0].name, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
+          email: blowfish.encrypt(data_sender.rows[0].email, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
           p_value: blowfish.encrypt(p_value, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
           g_value: blowfish.encrypt(g_value, sharedKeyRecipient, {cipherMode: 0, outputType: 0}),
           public_key: blowfish.encrypt(publicKey_friend1, sharedKeyRecipient, {cipherMode: 0, outputType: 0})});
@@ -278,7 +283,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       );
 
       await pool.query(
-        'UPDATE friends_dh SET publicKey_friend2 = $2 WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
+        'UPDATE friends_dh SET publicKey_friend2 = $3 WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
       [user_name1, user_name2, publicKey_friend2]
     );
        callback({ success: true, message: 'Amizade aceita' });
