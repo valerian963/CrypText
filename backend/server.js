@@ -260,12 +260,11 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
   // Aceitar solicitação
   socket.on('accept-friend', async (user_name1Encrypted, user_name2Encrypted, publicKey_friend2Encrypted, callback) => {
     try {
-      console.log(`Usuário ${user_name2} aceitou pedido de amziade de ${user_name1}`);
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
       const user_name1 = blowfish.decrypt(user_name1Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       const user_name2 = blowfish.decrypt(user_name2Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       const publicKey_friend2 = blowfish.decrypt(publicKey_friend2Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
-
+      console.log(`Usuário ${user_name2} aceitou pedido de amziade de ${user_name1}`);
       // Verifica se já existe uma solicitação pendente ou aceita
       const existingRequest = await pool.query(
         'SELECT * FROM users_friends WHERE ((friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)) AND friendship = true',
@@ -326,11 +325,11 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
    // Recusar solicitação 
    socket.on('reject-friend', async (user_name1Encrypted, user_name2Encrypted, callback) => {
     try {
-      console.log(`Usuário ${user_name2} recusou pedido de amziade de ${user_name1}`);
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
       const user_name1 = blowfish.decrypt(user_name1Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
       const user_name2 = blowfish.decrypt(user_name2Encrypted, sharedSecret, {cipherMode: 0, outputType: 0});
-
+      console.log(`Usuário ${user_name2} recusou pedido de amziade de ${user_name1}`);
+      
       // Deletar solicitação do banco porque foi rejeitada
       await pool.query(
         'DELETE FROM users_friends WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
