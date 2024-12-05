@@ -531,13 +531,9 @@ const getPendingFriendRequests = async (user_name, sharedSecret) => {
     console.log('Lista de solicitações descriptografada: \n',result.rows);
 
     for (let i=0;i<result.rowCount;i++){
-      const data_sender = await pool.query(
-        'SELECT name, email FROM users WHERE user_name = $1',
-        [result.rows[i]['friend1']]
-      );
       result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['name'] =  blowfish.encrypt(data_sender.rows['name'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['email'] =  blowfish.encrypt(data_sender.rows['email'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['name'] =  blowfish.encrypt(result.rows['name'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['email'] =  blowfish.encrypt(result.rows['email'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
