@@ -541,12 +541,12 @@ const getPendingFriendRequests = async (user_name, sharedSecret) => {
 const getAcceptedFriendRequests = async (user_name, sharedSecret) => {
   try {
     const result = await pool.query(
-      `SELECT friend2, publickey_friend2 FROM answered_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `SELECT friend2, publickey_friend2 FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, true]
     );
 
     await pool.query(
-      `DELETE FROM answered_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `DELETE FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, true]
     );
 
@@ -571,12 +571,12 @@ const getAcceptedFriendRequests = async (user_name, sharedSecret) => {
 const getRefusedFriendRequests = async (user_name, sharedSecret) => {
   try {
     const result = await pool.query(
-      `SELECT friend2 FROM answered_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `SELECT friend2 FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, false]
     );
 
     await pool.query(
-      `DELETE FROM answered_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `DELETE FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, false]
     );
 
