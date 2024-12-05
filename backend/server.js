@@ -532,8 +532,8 @@ const getPendingFriendRequests = async (user_name, sharedSecret) => {
 
     for (let i=0;i<result.rowCount;i++){
       result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['name'] =  blowfish.encrypt(result.rows['name'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['email'] =  blowfish.encrypt(result.rows['email'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['name'] =  blowfish.encrypt(result.rows[i]['name'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['email'] =  blowfish.encrypt(result.rows[i]['email'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
