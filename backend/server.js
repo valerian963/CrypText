@@ -332,19 +332,13 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
        }
        else{
         console.log(`Aceite do usuário ${user_name1} para amizade de ${user_name2} armazenado no banco de dados`);
-        const result = await pool.query(
-          'SELECT p_value, g_value FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
-        [user_name1, user_name2]
-        );
-        let p_value = result.p_value;
-        let g_value = result.g_value;
 
         await pool.query(
           `
-          INSERT INTO accepted_requests (friend1, friend2, p_value, g_value, publicKey_friend2, accepted)
-          VALUES ($1, $2, $3, $4, $5, $6);
+          INSERT INTO answered_requests (friend1, friend2, publicKey_friend2, accepted)
+          VALUES ($1, $2, $3, $4);
           `,
-          [user_name1, user_name2,p_value, g_value, publicKey_friend2, true]
+          [user_name1, user_name2, publicKey_friend2, true]
         );
        }
       } catch (error) {
@@ -383,19 +377,13 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
        }
        else{
         console.log(`Recusa do usuário ${user_name1} para amizade de ${user_name2} armazenada no banco de dados`);
-        const result = await pool.query(
-          'SELECT p_value, g_value FROM friends_dh WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
-        [user_name1, user_name2]
-        );
-        let p_value = result.p_value;
-        let g_value = result.g_value;
 
         await pool.query(
           `
-          INSERT INTO accepted_requests (friend1, friend2, p_value, g_value, publicKey_friend2, accepted)
-          VALUES ($1, $2, $3, $4, $5, $6);
+          INSERT INTO answered_requests (friend1, friend2, publicKey_friend2, accepted)
+          VALUES ($1, $2, $3, $4);
           `,
-          [user_name1, user_name2,p_value, g_value, publicKey_friend2, false]
+          [user_name1, user_name2, "", false]
         );
        }
 
@@ -561,11 +549,11 @@ const getPendingFriendRequests = async (user_name, sharedSecret) => {
         [result.rows[i]['friend1']]
       );
       result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['name'] =  blowfish.encrypt(data_sender.rows['name'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['email'] =  blowfish.encrypt(data_sender.rows['email'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['name'] =  blowfish.encrypt(result.rows[i]['name'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['email'] =  blowfish.encrypt(result.rows[i]['email'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['publickey_friend1'] =  blowfish.encrypt(result.rows[i]['publickey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
     };
 
     console.log('Lista de solicitações criptografada: \n',result.rows);
@@ -582,24 +570,20 @@ const getPendingFriendRequests = async (user_name, sharedSecret) => {
 const getAcceptedFriendRequests = async (user_name, sharedSecret) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `SELECT friend2, publickey_friend2 FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, true]
     );
 
     await pool.query(
-      `DELETE FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `DELETE FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, true]
     );
 
     console.log('Lista de solicitações aceitas descriptografada: \n',result.rows)
 
     for (let i=0;i<result.rowCount;i++){
-      result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['publicKey_friend2'] =  blowfish.encrypt(result.rows[i]['publicKey_friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['publickey_friend2'] =  blowfish.encrypt(result.rows[i]['publickey_friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
     };
 
     console.log('Lista de solicitações aceitas criptografada: \n',result.rows)
@@ -616,24 +600,19 @@ const getAcceptedFriendRequests = async (user_name, sharedSecret) => {
 const getRefusedFriendRequests = async (user_name, sharedSecret) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `SELECT friend2 FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, false]
     );
 
     await pool.query(
-      `DELETE FROM accepted_requests WHERE friend2 = $1 AND accepted = $2`, 
+      `DELETE FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
       [user_name, false]
     );
 
     console.log('Lista de solicitações aceitas descriptografada: \n',result.rows)
 
     for (let i=0;i<result.rowCount;i++){
-      result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['publicKey_friend2'] =  blowfish.encrypt(result.rows[i]['publicKey_friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
     };
 
     console.log('Lista de solicitações aceitas criptografada: \n',result.rows)

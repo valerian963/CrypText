@@ -42,14 +42,12 @@ const createUsersTable = async (pool) => {
       content TEXT
       );
       
-      CREATE TABLE IF NOT EXISTS accepted_requests (
+      CREATE TABLE IF NOT EXISTS answered_requests (
       friend1 VARCHAR(20),
       friend2 VARCHAR(20),
       PRIMARY KEY (friend1, friend2),
       CONSTRAINT fk_friend1 FOREIGN KEY(friend1) REFERENCES users(user_name),
       CONSTRAINT fk_friend2 FOREIGN KEY(friend2) REFERENCES users(user_name),
-      p_value TEXT NOT NULL,
-      g_value TEXT NOT NULL,
       publicKey_friend2 TEXT NOT NULL,
       accepted BOOLEAN
       );
