@@ -68,13 +68,16 @@ io.on('connection', (socket) => {
     } catch (err) {
       console.log('Token JWT valido');
       authenticatedSockets[socket.id] = false;
-      callback({ success: false, message: 'Token inválido' })
+      callback({ success: false, message: 'Token inválido' });
     }
   });
 
   // Quando um usuário se conecta, armazene o usuário e o socket
   socket.on('online-loged', async (user_nameEncrypted, callback) => {
     try{
+      if (!authenticatedSockets[socket.id]) {
+        callback({ success: false, message: 'Token inválido' });
+      }
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
       const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
 
@@ -99,6 +102,7 @@ io.on('connection', (socket) => {
   // usuario desconectado
   socket.on('disconnect', () => {
     try{
+      delete authenticatedSockets[socket.id];
       delete onlineUsers[disconnectedUser];}
     catch{
       console.log("Usuário não estava logado")
@@ -119,7 +123,9 @@ io.on('connection', (socket) => {
   socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted,imageEncrypted, callback) => {
     console.log("//Register user------------------------------------\n")
   try {
-
+    if (!authenticatedSockets[socket.id]) {
+      callback({ success: false, message: 'Token inválido' });
+    }
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
     const name = blowfish.decrypt(nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
     const email = blowfish.decrypt(emailEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
@@ -144,6 +150,9 @@ io.on('connection', (socket) => {
 socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
   console.log("//Login------------------------------------\n")
   try {
+    if (!authenticatedSockets[socket.id]) {
+      callback({ success: false, message: 'Token inválido' });
+    }
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
     const email = blowfish.decrypt(emailEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
     const password = blowfish.decrypt(passwordEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
