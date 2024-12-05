@@ -17,6 +17,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 let onlineUsers = {}
+let authenticatedSockets = {}
 
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -65,8 +66,9 @@ io.on('connection', (socket) => {
       const decoded = jwt.verify(token, JWT_SECRET);
       authenticatedSockets[socket.id] = true;
      callback({ success: true, message: 'Token válido' });
+     console.log('Token JWT valido');
     } catch (err) {
-      console.log('Token JWT valido');
+      console.log('Token JWT invalido');
       authenticatedSockets[socket.id] = false;
       callback({ success: false, message: 'Token inválido' });
     }
@@ -151,7 +153,9 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
   console.log("//Login------------------------------------\n")
   try {
     if (!authenticatedSockets[socket.id]) {
+      console.log("Token JWT inválido. Acesso bloqueado")
       callback({ success: false, message: 'Token inválido' });
+      return;
     }
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
     const email = blowfish.decrypt(emailEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
