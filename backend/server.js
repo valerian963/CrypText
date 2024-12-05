@@ -1,4 +1,5 @@
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
 const express = require('express');
 const { Pool } = require('pg');
 const bodyParser = require('body-parser');
@@ -55,6 +56,22 @@ io.on('connection', (socket) => {
     }
   });
 
+  // evento para validar token jwt
+  socket.on('token-jwt', (tokenEncrypted, callback) => {
+    try {
+      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+      const token = blowfish.decrypt(tokenEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+      console.log('Token JWT', token);
+      const decoded = jwt.verify(token, JWT_SECRET);
+      authenticatedSockets[socket.id] = true;
+     callback({ success: true, message: 'Token válido' });
+    } catch (err) {
+      console.log('Token JWT valido');
+      authenticatedSockets[socket.id] = false;
+      callback({ success: false, message: 'Token inválido' })
+    }
+  });
+
   // Quando um usuário se conecta, armazene o usuário e o socket
   socket.on('online-loged', async (user_nameEncrypted, callback) => {
     try{
@@ -70,12 +87,11 @@ io.on('connection', (socket) => {
         offlineReceivedMessages: await getOfflineMessages(user_name,sharedSecret),         //lista criptografada
         offlineFriendRequests:await getPendingFriendRequests(user_name,sharedSecret),     //listas criptografada
         offlineAcceptedRequests: await getAcceptedFriendRequests(user_name, sharedSecret),  //listas criptografada
-        offlineRefusedRequests: await getRefusedFriendRequests(user_name, sharedSecret)  //listas criptografada
+        offlineRefusedRequests: await getRefusedFriendRequests(user_name, sharedSecre)  //listas criptografada
       });
     }
     catch(error){
-	console.log(error)
-	callback({ success:false, message: 'Erro ao recuperar dados recebidos enquanto estava offline: ', erro:error});
+      callback({ success:false, message: 'Erro ao recuperar dados recebidos enquanto estava offline: ', erro:error});
     }
     
   });
@@ -83,12 +99,7 @@ io.on('connection', (socket) => {
   // usuario desconectado
   socket.on('disconnect', () => {
     try{
-      for (let id in onlineUsers){
-	if(onlineUsers[id] == socket.id){
-	delete onlineUsers[id];
-	}
-	}
-    }
+      delete onlineUsers[disconnectedUser];}
     catch{
       console.log("Usuário não estava logado")
     }
@@ -150,7 +161,6 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
       // Se as credenciais forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
         onlineUsers[user.user_name] = socket.id;     
         console.log(`Login realizado por usuário ${user.user_name}: ${socket.id}`);
-	console.log('Lista de usuários logados online: ', onlineUsers);
         callback({ success: true, message: 'Login realizado com sucesso', 
         user_name: blowfish.encrypt(user.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
         name: blowfish.encrypt(user.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
@@ -238,7 +248,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
         `,
         [user_name1, user_name2, p_value, g_value, publicKey_friend1]
       );
-	console.log('onlineUsers[user_name2]: ', onlineUsers[user_name2]);
+
       // Notifique o destinatário se ele estiver online
       if (onlineUsers[user_name2]) {
         const recipientSocketId = onlineUsers[user_name2];
@@ -449,6 +459,9 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
       const timestamp = blowfish.decrypt(timestampEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
      
       if (onlineUsers[recipient_user_name]) {
+        console.log(`Usuário ${recipient_user_name} online. Mandando mensagem diretamente ${onlineUsers}`)
+
+
         // Se o destinatário está online, envie a mensagem diretamente
         const recipientSocketId = onlineUsers[recipient_user_name];
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
@@ -520,20 +533,23 @@ const getOfflineMessages = async (user_name, sharedSecret) => {
 const getPendingFriendRequests = async (user_name, sharedSecret) => {
   try {
     const result = await pool.query(
-      `SELECT uf.friend1, u.name, u.email, f.p_value, f.g_value, f.publicKey_friend1
-      FROM users_friends uf
-      JOIN users u ON u.user_name = uf.friend1
-      JOIN friends_dh f ON (uf.friend1 = f.friend1 AND uf.friend2 = f.friend2)
-      WHERE uf.friend2 = $1 AND uf.friendship = false;`, 
+      `SELECT u.friend1, f.p_value, f.g_value, f.publicKey_friend1
+      FROM users_friends u
+      JOIN friends_dh f ON (u.friend1 = f.friend1 AND u.friend2 = f.friend2)
+      WHERE u.friend2 = $1 AND u.friendship = false;`, 
       [user_name]
     );
 
     console.log('Lista de solicitações descriptografada: \n',result.rows);
 
     for (let i=0;i<result.rowCount;i++){
+      const data_sender = await pool.query(
+        'SELECT name, email FROM users WHERE user_name = $1',
+        [result.rows[i]['friend1']]
+      );
       result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['name'] =  blowfish.encrypt(result.rows['name'],sharedSecret, {cipherMode: 0, outputType: 0});
-      result.rows[i]['email'] =  blowfish.encrypt(result.rows['email'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['name'] =  blowfish.encrypt(data_sender.rows['name'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['email'] =  blowfish.encrypt(data_sender.rows['email'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
@@ -603,6 +619,7 @@ const getRefusedFriendRequests = async (user_name, sharedSecret) => {
       result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['p_value'] =  blowfish.encrypt(result.rows[i]['p_value'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['g_value'] =  blowfish.encrypt(result.rows[i]['g_value'],sharedSecret, {cipherMode: 0, outputType: 0});
+      result.rows[i]['publicKey_friend1'] =  blowfish.encrypt(result.rows[i]['publicKey_friend1'],sharedSecret, {cipherMode: 0, outputType: 0});
       result.rows[i]['publicKey_friend2'] =  blowfish.encrypt(result.rows[i]['publicKey_friend2'],sharedSecret, {cipherMode: 0, outputType: 0});
     };
 

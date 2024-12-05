@@ -1,2 +1,7 @@
 .env
 manaus-cryptext.pem
+server.crt
+server.key
+node_modules/
+node_modules/.bin/mime
+node_modules/.package-lock.json
