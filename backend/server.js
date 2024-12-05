@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const createUsersTable = require('./database/db_tables.js');
 const diffie_hellman = require('./cryptography/diffie_hellman.js');
 const { blowfish } = require('./cryptography/blowfish.js')
@@ -16,6 +17,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 let onlineUsers = {}
+let authenticatedSockets = {}
 
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -52,6 +54,24 @@ io.on('connection', (socket) => {
     catch (error) {
       console.error('Erro ao fazer DH: ', error);
       callback({success:false});
+    }
+  });
+
+  // evento para validar token jwt
+  socket.on('token-jwt', (tokenEncrypted, callback) => {
+    try {
+      const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
+      const token = blowfish.decrypt(tokenEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
+      console.log('Token JWT Criptografado', tokenEncrypted);
+      console.log('Token JWT Descriptografado', token);
+      const decoded = jwt.verify(token, JWT_SECRET);
+      authenticatedSockets[socket.id] = true;
+      console.log('Token JWT válido');
+     callback({ success: true, message: 'Token válido' });
+    } catch (err) {
+      console.log('Token JWT inválido');
+      authenticatedSockets[socket.id] = false;
+      callback({ success: false, message: 'Token inválido' })
     }
   });
 
@@ -108,6 +128,11 @@ io.on('connection', (socket) => {
   socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted,imageEncrypted, callback) => {
     console.log("//Register user------------------------------------\n")
   try {
+    if (!authenticatedSockets[socket.id]) {
+      console.log("Token JWT inválido. Acesso bloqueado")
+      callback({ success: false, message: 'Token inválido' });
+      return;
+    }
 
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
     const name = blowfish.decrypt(nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
@@ -133,6 +158,11 @@ io.on('connection', (socket) => {
 socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
   console.log("//Login------------------------------------\n")
   try {
+    if (!authenticatedSockets[socket.id]) {
+      console.log("Token JWT inválido. Acesso bloqueado")
+      callback({ success: false, message: 'Token inválido' });
+      return;
+    }
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
     const email = blowfish.decrypt(emailEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
     const password = blowfish.decrypt(passwordEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
@@ -141,6 +171,7 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (result.rowCount === 0) {
       callback({ success: false, message: 'Usuário não encontrado' });
+      return;
     }
     
     const user = result.rows[0];
@@ -174,6 +205,12 @@ socket.on('login', async (emailEncrypted, passwordEncrypted, callback) => {
 socket.on('list-users', async (user_nameEncrypted, callback) => {
   console.log("//List users (not friends)------------------------------------\n")
   try {
+    if (!authenticatedSockets[socket.id]) {
+      console.log("Token JWT inválido. Acesso bloqueado")
+      callback({ success: false, message: 'Token inválido' });
+      return;
+    }
+
     const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];
     const user_name = blowfish.decrypt(user_nameEncrypted, sharedSecret, {cipherMode: 0, outputType: 0});
 
@@ -202,6 +239,11 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
   socket.on('friend-request', async (user_name1Encrypted, user_name2Encrypted, p_valueEncrypted, g_valueEncrypted, publicKey_friend1Encrypted, callback) => {
     console.log("//Request friendship------------------------------------\n")
     try {
+      if (!authenticatedSockets[socket.id]) {
+        console.log("Token JWT inválido. Acesso bloqueado")
+        callback({ success: false, message: 'Token inválido' });
+        return;
+      }
 
       const sharedSecret = diffie_hellman.diffieHellmanSharedKeysUsers[socket.id];  
 
@@ -438,6 +480,7 @@ socket.on('list-users', async (user_nameEncrypted, callback) => {
      
       if (onlineUsers[recipient_user_name]) {
         // Se o destinatário está online, envie a mensagem diretamente
+        console.log(`Usuário ${recipient_user_name} online. Mandando mensagem diretamente ${onlineUsers}`)
         const recipientSocketId = onlineUsers[recipient_user_name];
         const sharedKeyRecipient = diffie_hellman.diffieHellmanSharedKeysUsers[recipientSocketId];
         // Evento para enviar a mensagem criptografada ao destinatário online
