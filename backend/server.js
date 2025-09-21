@@ -83,7 +83,7 @@ io.on('connection', (socket) => {
     }
   });
 
-   // Evento de login dos usuários
+  // Evento de login dos usuários
   socket.on('login', async (user_nameEncrypted, passwordEncrypted, blowfish_keyEncrypted, signature , callback) => {
     console.log("//Login------------------------------------\n")
     try {
@@ -143,12 +143,131 @@ io.on('connection', (socket) => {
       return;
     }
   });
+
+
+   // Evento de solicitar lista dos usuários
+  socket.on('list-users', async (user_nameEncrypted, blowfish_keyEncrypted, signature , callback) => {
+    console.log("//List users (not friends)------------------------------------\n")
+    try {
+
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+
+      const pubKeyUser = await getUserPublicKey(user_name);
+      
+      // Verifica assinatura
+      const dataUsedInHash = JSON.stringify({
+        user_name: user_name,
+      });
+      
+      // VERIFICAÇÃO da assinatura
+      const isValidSignature = rsa.verify(pubKeyUser, dataUsedInHash, signature);
+      
+      if (!isValidSignature) {
+          callback({ success: false, message: "Assinatura digital inválida!" });
+          return;
+      }
+      console.log('Dados recebidos criptografados: ');
+      console.log({user_name_value: user_nameEncrypted});
+      console.log('\nDados recebidos descriptografados: ');
+      console.log({user_name_value: user_name});
+      console.log();
+
+      const result = await pool.query(
+        'SELECT u.user_name, u.name, u.email FROM users u WHERE u.user_name != $1 AND u.user_name NOT IN (SELECT CASE WHEN friend1 = $1 THEN friend2 ELSE friend1 END FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND (friendship = true OR friendship = false));', 
+        [user_name]);
+
+      console.log('Lista de usuários descriptografada: \n',result.rows)
+      
+      // Cifra a lista de usuários para enviar ao usuário
+      for (let i=0;i<result.rowCount;i++){
+          result.rows[i]['user_name'] =  blowfish.encrypt(result.rows[i]['user_name'],blowfish_key, {cipherMode: 0, outputType: 0});
+          result.rows[i]['name'] =  blowfish.encrypt(result.rows[i]['name'],blowfish_key, {cipherMode: 0, outputType: 0});
+          result.rows[i]['email'] =  blowfish.encrypt(result.rows[i]['email'],blowfish_key, {cipherMode: 0, outputType: 0});
+      };
+
+      console.log('Lista de usuários criptografada: \n',result.rows)
+      callback({success: true, list: result.rows});
+  } catch (error) {
+      console.error('Erro ao listar usuários:', error);
+      callback({success: false, list:[]});
+  }});
+
+
+  // Evento de solicitar amizade
+  socket.on('friend-request', async (user_name1Encrypted, user_name2Encrypted, blowfish_keyEncrypted, signature , callback) => {
+    console.log("//Login------------------------------------\n")
+    try {
+
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const user_name1 = blowfish.decrypt(user_name1Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const user_name2 = blowfish.decrypt(user_name2Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      
+      const pubKeyUser = await getUserPublicKey(user_name1);
+      const pubKeyUser_recipient = await getUserPublicKey(user_name2);
+      
+      console.log('Dados recebidos criptografados: ');
+      console.log({sender_value: user_name1Encrypted, receiver_value: user_name2Encrypted});
+      console.log('\nDados recebidos descriptografados: ');
+      console.log({sender_value: user_name1, receiver_value: user_name2});
+      console.log();
+
+      // Verifica se já existe uma solicitação pendente ou aceita
+      const existingRequest = await pool.query(
+        'SELECT * FROM users_friends WHERE ((friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)) AND friendship = true',
+        [user_name1, user_name2]
+      );
+      if (existingRequest.rowCount > 0) {
+        callback({success: false, message: 'Solicitação já enviada' });
+        console.log("Solicitação já enviada");
+        return;
+      }
+
+      // Armazenar solicitacao de amizade no banco de dados
+      await pool.query(
+        `
+        INSERT INTO users_friends (friend1, friend2, friendship)
+        VALUES ($1, $2, $3);
+        `,
+        [user_name1, user_name2,false]
+      );
+
+      console.log(`Solicitação de amizade de ${user_name1} para ${user_name2}`);
+      // Notifique o destinatário se ele estiver online
+      if (onlineUsers[user_name2]) {
+        const recipientSocketId = onlineUsers[user_name2];
+    
+        // Evento para enviar ao destinatário o pedido de amizade
+        const data_sender = await pool.query(
+          'SELECT name, email FROM users WHERE user_name = $1',
+          [user_name1]
+        );
+
+        // Preciso colocar o hash de assinatura aqui quando o servidor encaminha a solicitação pro usuario também?
+        console.log(`Notificando usuário ${user_name2}: da solicitação de amizade de ${user_name1}`);
+        io.to(recipientSocketId).emit('receive-friend-request', {
+          blowfish: rsa.encrypt(caPrivateKey, blowfish_key),
+          user_name: blowfish.encrypt(user_name1, blowfish_key, {cipherMode: 0, outputType: 0}),
+          name: blowfish.encrypt(data_sender.rows[0].name, blowfish_key, {cipherMode: 0, outputType: 0}),
+          email: blowfish.encrypt(data_sender.rows[0].email, blowfish_key, {cipherMode: 0, outputType: 0}),
+          certificate: blowfish.encrypt(data_sender.rows[0].certificate, blowfish_key, {cipherMode: 0, outputType: 0})
+        });
+      }
+      else{
+        console.log(`Solicitação do usuário ${user_name1} de amizade de ${user_name2} armazenado no banco de dados`);
+      }
+      callback({ success: true, message: 'Solicitação de amizade enviada' });
+    } catch (error) {
+      callback({ success: false, message: 'Erro ao enviar solicitação de amizade: ', error });
+      console.log('Erro ao enviar solicitação de amizade: ', error);
+    }
+  });
 });
 
 const getUserPublicKey = async (user_name) => {
     try {
     const result = await pool.query(
-      `SELECT certificate FROM users WHERE user_name = $1`, 
+      `SELECT * FROM users WHERE user_name = $1`, 
       [user_name]
     );
 
