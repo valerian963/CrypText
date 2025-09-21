@@ -38,7 +38,7 @@ io.on('connection', (socket) => {
   // REGISTRO E LOGIN--------------------------------------------------------------------------------------------------------------------------------------------------
 
   // Evento Registro de usuários
-  socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted, imageEncrypted, blowfish_keyEncrypted, certificate, hashEncrypted, callback) => {
+  socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted, imageEncrypted, blowfish_keyEncrypted, certificate, signature , callback) => {
     try {
       console.log('Dados recebidos criptografados: ');
       console.log({name_value:nameEncrypted, email_value: emailEncrypted});
@@ -48,7 +48,8 @@ io.on('connection', (socket) => {
 
       // Verifica se foi assinado pela CA do servidor
       if (!caCert.verify(userCertificate)) {
-        return callback({ success: false, message: "Certificado inválido! Não assinado pela CA)" });
+        callback({ success: false, message: "Certificado inválido! Não assinado pela CA)" });
+        return;
       }
 
       // Extrair chave pública do certificado
@@ -75,10 +76,11 @@ io.on('connection', (socket) => {
     });
       
       // VERIFICAÇÃO da assinatura
-      const isValidSignature = rsa.verify(pubKeyUser, dataUsedInHash, hashEncrypted);
+      const isValidSignature = rsa.verify(pubKeyUser, dataUsedInHash, signature);
 
       if (!isValidSignature) {
-          return callback({ success: false, message: "Assinatura digital inválida!" });
+          callback({ success: false, message: "Assinatura digital inválida!" });
+          return;
       }
 
       // Se tudo der certo, dados salvos no banco de dados e registro concluído
@@ -88,20 +90,24 @@ io.on('connection', (socket) => {
         );
 
         callback({ success: true, message: "Sucesso no registro de usuário"});
+        return;
     } catch (err) {
       console.error(err);
       callback({ success: false, message: "Erro no registro" });
+      return;
     }
   });
 
    // Evento de login dos usuários
-  socket.on('login', async (user_nameEncrypted, passwordEncrypted, hash, callback) => {
+  socket.on('login', async (user_nameEncrypted, passwordEncrypted, blowfish_keyEncrypted, signature , callback) => {
     console.log("//Login------------------------------------\n")
     try {
 
-      const user_name = rsa.decrypt(caPrivateKey, emailEncrypted);
-      const password = rsa.decrypt(caPrivateKey, passwordEncrypted);
-      const publicKey = getUserPublicKey(user_name);
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const password = blowfish.decrypt(passwordEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      
+      const pubKeyUser = await getUserPublicKey(user_name);
       
       console.log('Dados recebidos criptografados: ');
       console.log({username_value: user_nameEncrypted, password_value: passwordEncrypted});
@@ -111,10 +117,11 @@ io.on('connection', (socket) => {
         callback({ success: false, message: 'Usuário não encontrado' });
         return;
       }
+      const user = result.rows[0];
 
-      
       // Verifica se a senha fornecida corresponde à senha armazenada
       if (password === user.password) {
+        console.log('Verificacao de senhas: ', password, user.password);
         // Verifica assinatura
         const dataUsedInHash = JSON.stringify({
           user_name: user_name,
@@ -122,8 +129,9 @@ io.on('connection', (socket) => {
         });
       
       // VERIFICAÇÃO da assinatura
-      if (!rsa.verify(pubKeyUser, dataUsedInHash, hashEncrypted)) {
-          return callback({ success: false, message: "Assinatura digital inválida!" });
+      if (!rsa.verify(pubKeyUser, dataUsedInHash, signature)) {
+          callback({ success: false, message: "Assinatura digital inválida!" });
+          return;
       }
 
         // Se as credenciais e assinatura forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
@@ -131,18 +139,20 @@ io.on('connection', (socket) => {
           console.log(`Login realizado por usuário ${user.user_name}: ${socket.id}`);
           console.log('Lista de usuários logados online: ', onlineUsers);
           callback({ success: true, message: 'Login realizado com sucesso', 
-          user_name: blowfish.encrypt(user.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
-          name: blowfish.encrypt(user.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
-          profile_pic: blowfish.encrypt(user.profile_pic, sharedSecret, {cipherMode: 0, outputType: 0})});
+          user_name: blowfish.encrypt(user.user_name, blowfish_key, {cipherMode: 0, outputType: 0}), 
+          name: blowfish.encrypt(user.name, blowfish_key, {cipherMode: 0, outputType: 0}), 
+          profile_pic: blowfish.encrypt(user.profile_pic, blowfish_key, {cipherMode: 0, outputType: 0})});
       } else {
         // Senha incorreta
         console.log('Erro no login: Credenciais inválidas');
         callback({ success:false, message: 'Credenciais inválidas' });
+        return;
       }
     } catch (error) {
       console.error(error);
       // Em caso de erro, envia a mensagem de erro através do callback
       callback({ success:false, message: 'Erro ao fazer login', error: error.message });
+      return;
     }
   });
 });
