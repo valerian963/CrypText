@@ -1,5 +1,5 @@
 .env
 manaus-cryptext.pem
 node_modules/
-server.crt
-server.key
+backend/certificates/ca_cert.pem
+backend/certificates/ca_key.pem
