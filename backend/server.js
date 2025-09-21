@@ -10,7 +10,8 @@ const pki = forge.pki;
 const createUsersTable = require('./database/db_tables.js');
 const rsa = require('./cryptography/rsa.js');
 const { blowfish } = require('./cryptography/blowfish.js'); 
-const certificates = require('./certificates/digital_certificate.js')
+const certificates = require('./certificates/digital_certificate.js');
+const { sign } = require('crypto');
 const app = express();
 const server = http.createServer(app);
 const hostname = '0.0.0.0'; 
@@ -106,14 +107,17 @@ io.on('connection', (socket) => {
       // Verifica se a senha fornecida corresponde à senha armazenada
       if (password === user.password) {
         console.log('Verificacao de senhas: ', password, user.password);
+
         // Verifica assinatura
         const dataUsedInHash = JSON.stringify({
           user_name: user_name,
           password: password
         });
-      
+      console.log(pubKeyUser);
       // VERIFICAÇÃO da assinatura
-      if (!rsa.verify(pubKeyUser, dataUsedInHash, signature)) {
+      const isValidSignature = rsa.verify(pubKeyUser, dataUsedInHash, signature);
+      
+      if (!isValidSignature) {
           callback({ success: false, message: "Assinatura digital inválida!" });
           return;
       }
@@ -149,7 +153,7 @@ const getUserPublicKey = async (user_name) => {
     );
 
     const publicKey = certificates.getPublicKeyFromCert(result.rows[0].certificate);
-    console.log('Chave pública do usuário: ', publicKey);
+    console.log('Chave pública do usuário: ', result.rows[0].certificate);
 
     return publicKey;
 
