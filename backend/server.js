@@ -57,11 +57,11 @@ io.on('connection', (socket) => {
         "RSA-OAEP"
       );
 
-      const name = blowfish.decrypt(nameEncrypted, blowfish_key);
-      const email = blowfish.decrypt(emailEncrypted, blowfish_key);
-      const password = blowfish.decrypt(passwordEncrypted, blowfish_key);
-      const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key);
-      const image = blowfish.decrypt(imageEncrypted, blowfish_key);
+      const name = blowfish.decrypt(nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const email = blowfish.decrypt(emailEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const password = blowfish.decrypt(passwordEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const image = blowfish.decrypt(imageEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
 
       const dataUsedInHash = JSON.stringify({
       name: name,
