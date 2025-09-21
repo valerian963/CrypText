@@ -38,7 +38,7 @@ io.on('connection', (socket) => {
   // REGISTRO E LOGIN--------------------------------------------------------------------------------------------------------------------------------------------------
 
   // Evento Registro de usuários
-  socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted, imageEncrypted, blowfish_keyEncrypted, certificate, signature , callback) => {
+  socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted, imageEncrypted, blowfish_keyEncrypted, certificate , callback) => {
     try {
       console.log('Dados recebidos criptografados: ');
       console.log({name_value:nameEncrypted, email_value: emailEncrypted});
@@ -66,23 +66,7 @@ io.on('connection', (socket) => {
       const password = blowfish.decrypt(passwordEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
       const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
       const image = blowfish.decrypt(imageEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
-
-      const dataUsedInHash = JSON.stringify({
-      name: name,
-      email: email,
-      password: password,
-      user_name: user_name,
-      image: image
-    });
       
-      // VERIFICAÇÃO da assinatura
-      const isValidSignature = rsa.verify(pubKeyUser, dataUsedInHash, signature);
-
-      if (!isValidSignature) {
-          callback({ success: false, message: "Assinatura digital inválida!" });
-          return;
-      }
-
       // Se tudo der certo, dados salvos no banco de dados e registro concluído
       await pool.query(
         'INSERT INTO users (name, email, password, user_name, profile_pic, certificate) VALUES ($1, $2, $3, $4, $5, $6) RETURNING user_id',
