@@ -9,7 +9,7 @@ const forge = require("node-forge");
 const pki = forge.pki;
 const createUsersTable = require('./database/db_tables.js');
 const rsa = require('./cryptography/rsa.js');
-const blowfish = require('./cryptography/blowfish.js');
+const { blowfish } = require('./cryptography/blowfish.js'); 
 const certificates = require('./certificates/digital_certificate.js')
 const app = express();
 const server = http.createServer(app);
@@ -40,6 +40,9 @@ io.on('connection', (socket) => {
   // Evento Registro de usuários
   socket.on('register', async (nameEncrypted, emailEncrypted, passwordEncrypted, user_nameEncrypted, imageEncrypted, blowfish_keyEncrypted, certificate, hashEncrypted, callback) => {
     try {
+      console.log('Dados recebidos criptografados: ');
+      console.log({name_value:nameEncrypted, email_value: emailEncrypted});
+
       // Conversão do certificado enviado pelo usuário
       const userCertificate = pki.certificateFromPem(certificate);
 
@@ -49,7 +52,7 @@ io.on('connection', (socket) => {
       }
 
       // Extrair chave pública do certificado
-      const pubKeyUser = certificates.getUserPublicKey(certificate);
+      const pubKeyUser = certificates.getPublicKeyFromCert(certificate);
 
       //  Decifrar a chave Blowfish com a chave privada RSA do servidor
       const blowfish_key = caPrivateKey.decrypt(
@@ -90,7 +93,78 @@ io.on('connection', (socket) => {
       callback({ success: false, message: "Erro no registro" });
     }
   });
+
+   // Evento de login dos usuários
+  socket.on('login', async (user_nameEncrypted, passwordEncrypted, hash, callback) => {
+    console.log("//Login------------------------------------\n")
+    try {
+
+      const user_name = rsa.decrypt(caPrivateKey, emailEncrypted);
+      const password = rsa.decrypt(caPrivateKey, passwordEncrypted);
+      const publicKey = getUserPublicKey(user_name);
+      
+      console.log('Dados recebidos criptografados: ');
+      console.log({username_value: user_nameEncrypted, password_value: passwordEncrypted});
+      
+      const result = await pool.query('SELECT * FROM users WHERE user_name = $1', [user_name]);
+      if (result.rowCount === 0) {
+        callback({ success: false, message: 'Usuário não encontrado' });
+        return;
+      }
+
+      
+      // Verifica se a senha fornecida corresponde à senha armazenada
+      if (password === user.password) {
+        // Verifica assinatura
+        const dataUsedInHash = JSON.stringify({
+          user_name: user_name,
+          password: password
+        });
+      
+      // VERIFICAÇÃO da assinatura
+      if (!rsa.verify(pubKeyUser, dataUsedInHash, hashEncrypted)) {
+          return callback({ success: false, message: "Assinatura digital inválida!" });
+      }
+
+        // Se as credenciais e assinatura forem válidas, envia a resposta de successo ao cliente e as solicitações e mensagens pendentes
+          onlineUsers[user.user_name] = socket.id;     
+          console.log(`Login realizado por usuário ${user.user_name}: ${socket.id}`);
+          console.log('Lista de usuários logados online: ', onlineUsers);
+          callback({ success: true, message: 'Login realizado com sucesso', 
+          user_name: blowfish.encrypt(user.user_name, sharedSecret, {cipherMode: 0, outputType: 0}), 
+          name: blowfish.encrypt(user.name, sharedSecret, {cipherMode: 0, outputType: 0}), 
+          profile_pic: blowfish.encrypt(user.profile_pic, sharedSecret, {cipherMode: 0, outputType: 0})});
+      } else {
+        // Senha incorreta
+        console.log('Erro no login: Credenciais inválidas');
+        callback({ success:false, message: 'Credenciais inválidas' });
+      }
+    } catch (error) {
+      console.error(error);
+      // Em caso de erro, envia a mensagem de erro através do callback
+      callback({ success:false, message: 'Erro ao fazer login', error: error.message });
+    }
+  });
 });
+
+const getUserPublicKey = async (user_name) => {
+    try {
+    const result = await pool.query(
+      `SELECT certificate FROM users WHERE user_name = $1`, 
+      [user_name]
+    );
+
+    const publicKey = certificates.getPublicKeyFromCert(result.rows[0].certificate);
+    console.log('Chave pública do usuário: ', publicKey);
+
+    return publicKey;
+
+  } catch (error) {
+    console.error('Erro ao recuperar chave publica:', error);
+    return null;
+  }
+  };
+
 
   createUsersTable(pool);
   const PORT = 3000;
@@ -100,20 +174,5 @@ io.on('connection', (socket) => {
 });
 
 
-  // const getUserPublicKey = async (user_name) => {
-  //   try {
-  //   const result = await pool.query(
-  //     `SELECT certificate FROM users WHERE user_name = $1`, 
-  //     [user_name]
-  //   );
 
-  //   result.rows[0].public_key;
-  //   console.log('Chave pública do usuário: ', result.rows[0].public_key);
 
-  //   return result.rows[0].public_key;
-
-  // } catch (error) {
-  //   console.error('Erro ao recuperar chave publica:', error);
-  //   return null;
-  // }
-  // };

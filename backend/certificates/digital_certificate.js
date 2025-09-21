@@ -50,7 +50,30 @@ function getPublicKeyFromCert(certPem) {
   return pubKey
 }
 
+// Função para gerar um certificado de usuário assinado pela CA
+function generateUserCertificate(username, caCert, caPrivateKey) {
+    const keys = pki.rsa.generateKeyPair(2048);
+    const cert = pki.createCertificate();
+    cert.publicKey = keys.publicKey;
+    cert.serialNumber = new Date().getTime().toString();
+    cert.validity.notBefore = new Date();
+    cert.validity.notAfter = new Date();
+    cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
+    cert.setSubject([{ name: "commonName", value: username }]);
+    cert.setIssuer(caCert.subject.attributes);
+    cert.sign(caPrivateKey, forge.md.sha256.create());
+
+    return {
+        userCert: cert,
+        userPrivateKey: keys.privateKey,
+        userPublicKey: keys.publicKey,
+        userCertPem: pki.certificateToPem(cert),
+        userPrivateKeyPem: pki.privateKeyToPem(keys.privateKey)
+    };
+}
+
 module.exports = {
-    loadOrCreateCA, // <--- Esta linha é crucial
-    getPublicKeyFromCert // Se você tiver esta função
+    loadOrCreateCA,
+    generateUserCertificate,
+    getPublicKeyFromCert 
 };
