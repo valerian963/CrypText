@@ -10,7 +10,7 @@ function loadOrCreateCA() {
     const caPrivateKeyPem = fs.readFileSync("ca_key.pem", "utf8");
     return {
       caCert: pki.certificateFromPem(caCertPem),
-      caPublicKey: caCert.publicKey,
+      caPublicKey: pki.certificateFromPem(caCertPem).publicKey,
       caPrivateKey: pki.privateKeyFromPem(caPrivateKeyPem),
       caCertPem,
       caPrivateKeyPem
@@ -49,3 +49,8 @@ function getPublicKeyFromCert(certPem) {
 //   return pki.publicKeyToPem(pubKey);
   return pubKey
 }
+
+module.exports = {
+    loadOrCreateCA, // <--- Esta linha é crucial
+    getPublicKeyFromCert // Se você tiver esta função
+};

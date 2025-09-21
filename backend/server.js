@@ -70,12 +70,9 @@ io.on('connection', (socket) => {
       user_name: user_name,
       image: image
     });
-
-      // Decifra o hash com a chave publica RSA do usuario
-      const hashUser = rsa.decrypt(pubKeyUser, hashEncrypted);
       
       // VERIFICAÇÃO da assinatura
-      const isValidSignature = rsa.verify(userPublicKey, dataUsedInHash, hashUser);
+      const isValidSignature = rsa.verify(pubKeyUser, dataUsedInHash, hashEncrypted);
 
       if (!isValidSignature) {
           return callback({ success: false, message: "Assinatura digital inválida!" });
