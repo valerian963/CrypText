@@ -372,6 +372,42 @@ io.on('connection', (socket) => {
         callback({ success: false, message: 'Erro ao rejeitar solicitação de amizade' });
       }
   });
+
+  // Evento de listar amigos
+  socket.on('list-friends', async (user_nameEncrypted, blowfish_keyEncrypted, signature , callback) => {
+    console.log("//List friends------------------------------------\n")
+    try {
+
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      
+      const pubKeyUser = await getUserPublicKey(user_name);
+
+      console.log('Dados recebidos criptografados: ');
+      console.log({sender_value: user_nameEncrypted});
+      console.log('\nDados recebidos descriptografados: ');
+      console.log({sender_value: user_name});
+
+      const friends = await pool.query(
+        'SELECT * FROM users_friends WHERE (friend1 = $1 OR friend2 = $1) AND friendship = true',
+        [user_name]
+      );
+      if (friends.rowCount>0) {
+        console.log(`Amigos de ${user_name}`,friends.rows)
+        callback({success:true, friends: blowfish.encrypt(friends.rows,blowfish_key, {cipherMode: 0, outputType: 0}),
+        blowfish: rsa.encrypt(pubKeyUser,blowfish_key)
+      });  //lista cifrada
+      }
+      else{
+        callback({success: false, friends: [] });
+      }
+      } catch (error) {
+        console.error('Erro ao listar amigos:', error);
+        callback({ success: false, message: 'Erro ao listar amigos:', error });
+      }
+  });
+
+
 });
 
 const getUserPublicKey = async (user_name) => {
