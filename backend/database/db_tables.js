@@ -24,7 +24,9 @@ const createUsersTable = async (pool) => {
       friend2 VARCHAR(20),
       dateTime TEXT,
       PRIMARY KEY (friend1, friend2, dateTime),
-      content TEXT
+      content TEXT,
+      blowfish_key TEXT,
+      signature TEXT
       );
       
       CREATE TABLE IF NOT EXISTS answered_requests (

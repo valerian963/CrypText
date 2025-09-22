@@ -265,6 +265,8 @@ io.on('connection', (socket) => {
 
 
   // Evento de aceitar solicitação
+  // user_name1 é quem solicitou a amizade
+  // user_name2 é quem aceitou a solicitação e chamou esse evento
   socket.on('accept-friend', async (user_name1Encrypted, user_name2Encrypted, blowfish_keyEncrypted, signature , callback) => {
     console.log("//Accept friend------------------------------------\n")
     try {
@@ -274,7 +276,7 @@ io.on('connection', (socket) => {
       const user_name2 = blowfish.decrypt(user_name2Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
       
       const pubKeyUser = await getUserPublicKey(user_name1);
-      // const pubKeyUser_sender = await getUserPublicKey(user_name2);
+      const pubKeyUser_sender = await getUserPublicKey(user_name2);
       
       console.log('Dados recebidos criptografados: ');
       console.log({sender_value: user_name1Encrypted, receiver_value: user_name2Encrypted});
@@ -298,15 +300,17 @@ io.on('connection', (socket) => {
       [user_name1, user_name2,true]
       );
 
-      callback({ success: true, message: 'Amizade aceita' });
+      callback({ success: true, message: 'Amizade aceita', 
+        certificate_friend: blowfish.encrypt(pubKeyUser, blowfish_key,{cipherMode: 0, outputType: 0})});
 
       if (onlineUsers[user_name1]) {
         // Se o destinatário está online, envie o aceite de amizade diretamente
         console.log(`Notificando usuário ${user_name1}: do aceite de amizade de ${user_name2}`);
         const recipientSocketId = onlineUsers[user_name1]
         io.to(recipientSocketId).emit('accepted-friendship', 
-          {user_name: blowfish.encrypt(user_name2, caPrivateKey,{cipherMode: 0, outputType: 0}),
-          certificate: blowfish.encrypt(pubKeyUser, caPrivateKey,{cipherMode: 0, outputType: 0})
+          {user_name: blowfish.encrypt(user_name2, blowfish_key,{cipherMode: 0, outputType: 0}),
+          certificate_friend: blowfish.encrypt(pubKeyUser_sender, blowfish_key,{cipherMode: 0, outputType: 0},
+          )
           });
         }
         else{
@@ -316,7 +320,7 @@ io.on('connection', (socket) => {
           INSERT INTO answered_requests (friend1, friend2, publicKey_friend2, accepted)
           VALUES ($1, $2, $3, $4);
           `,
-          [user_name1, user_name2, publicKey_friend2, true]
+          [user_name1, user_name2, pubKeyUser_sender, true]
         );
         }
       } catch (error) {
@@ -409,7 +413,7 @@ io.on('connection', (socket) => {
 
 
   // Evento de listar amigos que estão ONLINE
-  socket.on('list-friends', async (user_nameEncrypted, blowfish_keyEncrypted, signature , callback) => {
+  socket.on('online-friends', async (user_nameEncrypted, blowfish_keyEncrypted, signature , callback) => {
     console.log("//List friends------------------------------------\n")
     try {
       const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
@@ -444,7 +448,48 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Evento de enviar mensagem para amigos
+  socket.on('send-message', async (sender_user_nameEncrypted,recipient_user_nameEncrypted, timestampEncrypted, message, blowfish_keyEncrypted, blowfishMessage, signature , callback) => {
+    console.log("//Send message------------------------------------\n");
+    try {
 
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const sender_user_name = blowfish.decrypt(sender_user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const recipient_user_name = blowfish.decrypt(recipient_user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+
+      const pubKeyUser_recipient = await getUserPublicKey(recipient_user_name);
+      
+      console.log('Dados recebidos criptografados: ');
+      console.log({sender_value: sender_user_nameEncrypted, receiver_value: recipient_user_nameEncrypted,timestamp:timestampEncrypted});
+      console.log('\nDados recebidos descriptografados: ');
+      console.log({sender_value: sender_user_name, receiver_value: recipient_user_name,timestamp:timestamp});
+      console.log();
+
+      if (onlineUsers[recipient_user_name]) {
+        // Se o destinatário está online, envie a mensagem diretamente
+        console.log(`Usuário ${recipient_user_name} online. Mandando mensagem diretamente`);
+        console.log('Lista de usuários logados online: ', onlineUsers);
+        const recipientSocketId = onlineUsers[recipient_user_name];
+
+        // Evento para enviar a mensagem criptografada ao destinatário online
+        io.to(recipientSocketId).emit('receive-message', 
+          {sender: blowfish.encrypt(sender_user_name,pubKeyUser_recipient, {cipherMode: 0, outputType: 0}),
+          timestamp:timestampEncrypted,
+          blowfish: blowfishMessage,
+          content: message,
+          signature:signature});
+  
+      } else {
+        // Caso o destinatário esteja offline, armazene a mensagem no banco
+        console.log(`Usuário ${recipient_user_name} está offline. Armazenando mensagem no banco.`);
+        storeOfflineMessage(sender_user_name, recipient_user_name, timestampEncrypted, message, blowfishMessage, signature);
+      }
+      callback({success: true}); 
+      } catch (error) {
+        console.error('Erro ao aceitar solicitação de amizade:', error);
+        callback({ success: false, message: 'Erro ao aceitar solicitação de amizade' });
+      }
+  });
 });
 
 const getUserPublicKey = async (user_name) => {
@@ -463,8 +508,15 @@ const getUserPublicKey = async (user_name) => {
     console.error('Erro ao recuperar chave publica:', error);
     return null;
   }
-  };
+};
 
+// Função para armazenar mensagens offline no banco de dados
+async function storeOfflineMessage(sender_user_name, recipient_user_name, timestampEncrypted, message, blowfishMessage, signature) {
+  await pool.query(
+    'INSERT INTO messages (friend1, friend2, datetime, content, blowfish_key, signature) VALUES ($1, $2, $3, $4, $5, $6)',
+    [sender_user_name, recipient_user_name, timestampEncrypted, message, blowfishMessage, signature]
+  );
+}
 
   createUsersTable(pool);
   const PORT = 3000;
