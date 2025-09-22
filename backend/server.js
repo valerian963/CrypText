@@ -408,6 +408,43 @@ io.on('connection', (socket) => {
   });
 
 
+  // Evento de listar amigos que estão ONLINE
+  socket.on('list-friends', async (user_nameEncrypted, blowfish_keyEncrypted, signature , callback) => {
+    console.log("//List friends------------------------------------\n")
+    try {
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const user_name = blowfish.decrypt(user_nameEncrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      
+      const pubKeyUser = await getUserPublicKey(user_name);
+
+      console.log('Dados recebidos criptografados: ');
+      console.log({sender_value: user_nameEncrypted});
+      console.log('\nDados recebidos descriptografados: ');
+      console.log({sender_value: user_name});
+
+      let list = Object.keys(onlineUsers);
+      
+      const result = await pool.query(`
+        SELECT u.user_name, u.name 
+        FROM users u
+        JOIN users_friends uf ON (u.user_name = uf.friend1 OR u.user_name = uf.friend2)
+        WHERE ((uf.friend1 = $1 AND uf.friend2 != $1) OR 
+              (uf.friend2 = $1 AND uf.friend1 != $1))
+          AND uf.friendship = TRUE
+          AND u.user_name = ANY($2)
+        `, [user_name, list]);
+
+      console.log('Lista de amigos online',result.rows);
+      callback({success: true, list: blowfish.encrypt(result.rows,blowfish_key, {cipherMode: 0, outputType: 0}),
+    blowfish: rsa.encrypt(pubKeyUser,blowfish_key)}); //lista criptografada
+    }
+    catch(error){
+      console.log('Falha ao listar amigos online: ', error);
+      callback({success: false}); //lista criptografada
+    }
+  });
+
+
 });
 
 const getUserPublicKey = async (user_name) => {
