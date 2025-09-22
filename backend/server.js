@@ -274,7 +274,7 @@ io.on('connection', (socket) => {
       const user_name2 = blowfish.decrypt(user_name2Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
       
       const pubKeyUser = await getUserPublicKey(user_name1);
-      const pubKeyUser_sender = await getUserPublicKey(user_name2);
+      // const pubKeyUser_sender = await getUserPublicKey(user_name2);
       
       console.log('Dados recebidos criptografados: ');
       console.log({sender_value: user_name1Encrypted, receiver_value: user_name2Encrypted});
@@ -322,6 +322,54 @@ io.on('connection', (socket) => {
       } catch (error) {
         console.error('Erro ao aceitar solicitação de amizade:', error);
         callback({ success: false, message: 'Erro ao aceitar solicitação de amizade' });
+      }
+  });
+
+
+  // Evento de rejeitar solicitação de amizade
+  socket.on('reject-friend', async (user_name1Encrypted, user_name2Encrypted, blowfish_keyEncrypted, signature , callback) => {
+    console.log("//Reject friend------------------------------------\n")
+    try {
+
+      const blowfish_key = rsa.decrypt(caPrivateKey, blowfish_keyEncrypted);
+      const user_name1 = blowfish.decrypt(user_name1Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      const user_name2 = blowfish.decrypt(user_name2Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
+      
+      console.log('Dados recebidos criptografados: ');
+      console.log({sender_value: user_name1Encrypted, receiver_value: user_name2Encrypted});
+      console.log('\nDados recebidos descriptografados: ');
+      console.log({sender_value: user_name1, receiver_value: user_name2});
+
+      console.log(`Usuário ${user_name2} recusou pedido de amizade de ${user_name1}`);
+
+      // Deletar solicitação do banco porque foi rejeitada
+      await pool.query(
+        'DELETE FROM users_friends WHERE (friend1 = $1 AND friend2 = $2) OR (friend1 = $2 AND friend2 = $1)',
+      [user_name1, user_name2]
+      );
+
+      if (onlineUsers[user_name1]) {
+        // Se o destinatário está online, envie a recusa de amizade diretamente
+        console.log(`Notificando usuário ${user_name1}: da recusa de amizade de ${user_name2}`);
+        const recipientSocketId = onlineUsers[user_name1]
+        io.to(recipientSocketId).emit('refused-friendship', 
+          {user_name: blowfish.encrypt(user_name2, caPrivateKey,{cipherMode: 0, outputType: 0})});
+        }
+      else{
+        console.log(`Recusa do usuário ${user_name2} para amizade de ${user_name1} armazenada no banco de dados`);
+
+        await pool.query(
+          `
+          INSERT INTO answered_requests (friend1, friend2, publicKey_friend2, accepted)
+          VALUES ($1, $2, $3, $4);
+          `,
+          [user_name1, user_name2, "", false]);
+      }
+
+        callback({ success: true, message: 'Solicitação rejeitada' });
+      } catch (error) {
+        console.error('Erro ao rejeitar solicitação de amizade:', error);
+        callback({ success: false, message: 'Erro ao rejeitar solicitação de amizade' });
       }
   });
 });
