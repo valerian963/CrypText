@@ -126,10 +126,18 @@ io.on('connection', (socket) => {
           onlineUsers[user.user_name] = socket.id;     
           console.log(`Login realizado por usuário ${user.user_name}: ${socket.id}`);
           console.log('Lista de usuários logados online: ', onlineUsers);
-          callback({ success: true, message: 'Login realizado com sucesso', 
+
+          callback({ 
+          success: true, 
+          message: 'Login realizado com sucesso. Recuperando dados recebidos enquanto estava offline', 
           user_name: blowfish.encrypt(user.user_name, blowfish_key, {cipherMode: 0, outputType: 0}), 
           name: blowfish.encrypt(user.name, blowfish_key, {cipherMode: 0, outputType: 0}), 
-          profile_pic: blowfish.encrypt(user.profile_pic, blowfish_key, {cipherMode: 0, outputType: 0})});
+          profile_pic: blowfish.encrypt(user.profile_pic, blowfish_key, {cipherMode: 0, outputType: 0}),
+          offlineReceivedMessages: await getOfflineMessages(user_name,blowfish_key),         //lista criptografada
+          offlineFriendRequests:await getPendingFriendRequests(user_name,blowfish_key),     //listas criptografada
+          offlineAcceptedRequests: await getAcceptedFriendRequests(user_name, blowfish_key),  //listas criptografada
+          offlineRefusedRequests: await getRefusedFriendRequests(user_name, blowfish_key)  //listas criptografada
+        });
       } else {
         // Senha incorreta
         console.log('Erro no login: Credenciais inválidas');
@@ -203,8 +211,8 @@ io.on('connection', (socket) => {
       const user_name1 = blowfish.decrypt(user_name1Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
       const user_name2 = blowfish.decrypt(user_name2Encrypted, blowfish_key, {cipherMode: 0, outputType: 0});
       
-      const pubKeyUser = await getUserPublicKey(user_name1);
-      const pubKeyUser_recipient = await getUserPublicKey(user_name2);
+      // const pubKeyUser = await getUserPublicKey(user_name1);
+      // const pubKeyUser_recipient = await getUserPublicKey(user_name2);
       
       console.log('Dados recebidos criptografados: ');
       console.log({sender_value: user_name1Encrypted, receiver_value: user_name2Encrypted});
@@ -492,6 +500,7 @@ io.on('connection', (socket) => {
   });
 });
 
+// FUNÇÕES AUXILIARES---------------------------------
 const getUserPublicKey = async (user_name) => {
     try {
     const result = await pool.query(
@@ -517,6 +526,130 @@ async function storeOfflineMessage(sender_user_name, recipient_user_name, timest
     [sender_user_name, recipient_user_name, timestampEncrypted, message, blowfishMessage, signature]
   );
 }
+
+// Função para listar mensagens recebidas enquanto estava offline
+const getOfflineMessages = async (user_name, blowfish_key) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM messages WHERE friend2 = $1`, 
+      [user_name]
+    );
+
+    await pool.query(
+      `DELETE FROM messages WHERE friend2 = $1`, 
+      [user_name]
+    );
+    
+    console.log('Lista de mensagens descriptografada: \n',result.rows)
+
+    for (let i=0;i<result.rowCount;i++){
+      result.rows[i]['friend1'] =  blowfish.encrypt(result.rows[i]['friend1'], blowfish_key, {cipherMode: 0, outputType: 0});
+      result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'], blowfish_key, {cipherMode: 0, outputType: 0});
+    };
+
+    console.log('Lista de usuários criptografada: \n',result.rows)
+
+    return result.rows;
+    
+  } catch (error) {
+    console.error('Erro ao recuperar mensagens offline:', error);
+    return [];
+  }
+};
+
+// Função para listar solicitações de amizade pendentes
+const getPendingFriendRequests = async (user_name, blowfish_key) => {
+  try {
+    const result = await pool.query(
+        `SELECT 
+            uf.friend1 AS requester_username, 
+            u.name AS requester_name,
+            u.email AS requester_email,
+            u.certificate AS requester_certificate 
+          FROM users_friends uf
+          JOIN users u ON u.user_name = uf.friend1 
+          WHERE uf.friend2 = $1 
+          AND uf.friendship = FALSE;`, // 'FALSE' para solicitações pendentes
+        [user_name]
+    );
+
+    console.log('Solicitações pendentes em texto simples do DB: \n', result.rows);
+
+    // Criptografa cada campo para o transporte
+    for (let i = 0; i < result.rowCount; i++) {
+        result.rows[i]['requester_username'] = blowfish.encrypt(result.rows[i]['requester_username'], blowfish_key, { cipherMode: 0, outputType: 0 });
+        result.rows[i]['requester_name'] = blowfish.encrypt(result.rows[i]['requester_name'], blowfish_key, { cipherMode: 0, outputType: 0 });
+        result.rows[i]['requester_email'] = blowfish.encrypt(result.rows[i]['requester_email'], blowfish_key, { cipherMode: 0, outputType: 0 });
+        result.rows[i]['requester_certificate'] = blowfish.encrypt(result.rows[i]['requester_certificate'], blowfish_key, { cipherMode: 0, outputType: 0 });
+    }
+
+    console.log('Solicitações pendentes criptografadas para envio ao cliente: \n', result.rows);
+
+    return result.rows;
+    } catch (error) {
+        console.error('Erro ao recuperar solicitações de amizade pendentes:', error);
+        return [];
+    }
+};
+
+// função para listar solicitações de amizade aceitas
+const getAcceptedFriendRequests = async (user_name, blowfish_key ) => {
+  try {
+    const result = await pool.query(
+      `SELECT friend2 FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
+      [user_name, true]
+    );
+
+    await pool.query(
+      `DELETE FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
+      [user_name, true]
+    );
+
+    console.log('Lista de solicitações aceitas descriptografada: \n',result.rows)
+
+    for (let i=0;i<result.rowCount;i++){
+      result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'],blowfish_key , {cipherMode: 0, outputType: 0});
+    };
+
+    console.log('Lista de solicitações aceitas criptografada: \n',result.rows)
+
+    return result.rows;
+  } catch (error) {
+    console.error('Erro ao recuperar solicitações de amizade aceitas:', error);
+    return [];
+  }
+};
+
+
+// função para listar solicitações de amizade aceitas
+const getRefusedFriendRequests = async (user_name, blowfish_key ) => {
+  try {
+    const result = await pool.query(
+      `SELECT friend2 FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
+      [user_name, false]
+    );
+
+    await pool.query(
+      `DELETE FROM answered_requests WHERE friend1 = $1 AND accepted = $2`, 
+      [user_name, false]
+    );
+
+    console.log('Lista de solicitações aceitas descriptografada: \n',result.rows)
+
+    for (let i=0;i<result.rowCount;i++){
+      result.rows[i]['friend2'] =  blowfish.encrypt(result.rows[i]['friend2'],blowfish_key , {cipherMode: 0, outputType: 0});
+    };
+
+    console.log('Lista de solicitações aceitas criptografada: \n',result.rows)
+
+    return result.rows;
+  } catch (error) {
+    console.error('Erro ao recuperar solicitações de amizade aceitas:', error);
+    return [];
+  }
+};
+
+//--------------------------
 
   createUsersTable(pool);
   const PORT = 3000;
